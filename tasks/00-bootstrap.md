@@ -40,6 +40,13 @@ generated service, installed by `go tool` / `uv` respectively.
    as reproducible as theirs. Use the versions settled in chunk 01 if this
    chunk runs after it; otherwise pin what's installed and let chunk 01
    revise.
+
+   > **Revised by ADR 0011.** This chunk is done and it pinned `golang
+   > 1.26.5` / `python 3.14.6` — what was installed at the time. ADR 0011
+   > settled the real pins as `golang 1.26.6` / `python 3.14.7` / `uv
+   > 0.12.5`; both bumps are security releases and both are asdf-installable.
+   > **Chunk 02 applies them** (`asdf install` first) — do not treat the
+   > current `.tool-versions` as authoritative.
 2. Create the directory skeleton from spec § Repo layout: `templates/`
    (with `_common/`, `go-service/`, `python-service/`), `docs/` (with
    `decisions/`), `scripts/`, `tasks/`.
@@ -79,10 +86,12 @@ no service code, no ADR content (chunk 01 writes those).
 
 ## Acceptance criteria
 
-- `make help` prints every target the spec's parity table names, including
-  the not-yet-implemented ones, with descriptions.
-- `make parity` exits non-zero with a clear "not implemented" message —
-  not a confusing make error.
+- `make help` lists mint's own targets with descriptions. (These are *not*
+  the generated-service targets in spec § Makefile parity — that's a
+  different list, delivered by chunk 02.)
+- Every unimplemented target exits non-zero with a message naming the chunk
+  that implements it — never a bare make error, and never a silent success
+  that could be mistaken for a passing check.
 - `git log` shows one commit on `main`; `git status` is clean, with
   `.claude/settings.local.json` ignored rather than committed.
 - `prompt.md` and `tasks/` are tracked in that first commit — they predate
