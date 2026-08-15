@@ -354,7 +354,8 @@ deferral mechanical rather than remembered.
 **Go**
 - Go **1.26.6** ([ADR 0011](docs/decisions/0011-pinned-toolchain-versions.md))
 - `net/http` (stdlib) — no web framework
-- `log/slog` (stdlib), with `lmittmann/tint` for tier-1 color (see Logging)
+- `log/slog` (stdlib), with `lmittmann/tint` **v1.2.0** for tier-1 color
+  ([ADR 0012](docs/decisions/0012-pin-lmittmann-tint-for-go-console-logging.md))
 - `go-playground/validator` for runtime constraint enforcement
 - `golangci-lint` + `gofumpt`, config checked in
 
@@ -438,10 +439,18 @@ Every line carries: `timestamp`, `level`, `service`, `service_version`,
 span context automatically and are **omitted entirely** when there is no
 span — never empty, never fabricated.
 
-**Tier 1 — console**, colorized, default when `ENV=local`. Go uses
+**Tier 1 — console**, colorized, default when `MINT_ENV=local`. Go uses
 `lmittmann/tint`; `slog.NewTextHandler` emits no ANSI color at all, so this
 document's original claim was unachievable as written. Python uses
 structlog's `ConsoleRenderer`.
+
+**Both renderers' defaults must be overridden.** tint renders
+`Aug 14 18:42:27.231` and `INF`; `ConsoleRenderer` decides colour by asking
+only whether `colorama` is importable — it checks neither `isatty()` nor
+`NO_COLOR`, so it will write ANSI escapes into a redirected file. Configure
+tint's `TimeFormat` and level renderer to the reserved-field contract, and
+pass `colors=stream.isatty() and not os.environ.get("NO_COLOR")` to
+`ConsoleRenderer`.
 
 **Tier 2 — JSON**, one object per line. Go's `JSONHandler` wrapped in a
 custom handler; structlog's `JSONRenderer` in Python. **Proven
@@ -541,9 +550,21 @@ losing readiness detail and the final metrics scrape. Setting
 `admin_port == port` collapses onto one listener and must keep working.
 
 **Two `uvicorn.Server` instances race on signal handlers** and the process
-dies exit 143 before draining. The fix is one line, and chunk 06's SIGTERM
-assertion must run against the split config — the only one where the bug
-appears.
+dies exit 143 before draining. Chunk 06's SIGTERM assertion must run against
+the split config — under a collapsed listener the race cannot appear, so
+testing only that path would pass while shipping the bug.
+
+The fix has a consequence the spec didn't anticipate: **`uvicorn.run()` is
+not used in a finished Mint service**
+([ADR 0014](docs/decisions/0014-python-entrypoint-owns-its-servers-and-signals.md)).
+It builds exactly one `Server` and exposes no handle on which to neutralize
+`capture_signals`, so the composition root constructs `uvicorn.Config` and
+`uvicorn.Server` per listener and owns SIGTERM itself. `log_config=None` and
+`access_log=False` move onto each `Config` — **losing either during that move
+silently restores uvicorn's own log handlers**, and the symptom appears
+nowhere near the change that caused it. This converges the two composition
+roots rather than dividing them: Go was always going to construct its
+`http.Server` values explicitly and own its signals.
 
 ---
 
@@ -604,6 +625,12 @@ The downgrade is ~20 lines: rewrite `exclusiveMinimum`/`exclusiveMaximum`,
 drop `jsonSchemaDialect`. Publish named types as components, never inline,
 and attach descriptions to `$ref`s via `allOf` so the document downgrades
 cleanly.
+
+The downgraded copy is committed as **`openapi-3.0.json`** and governed by
+the same four rules as the other generated artifacts
+([ADR 0013](docs/decisions/0013-govern-the-downgraded-openapi-document.md)).
+It is **served nowhere** — it's a build artifact for client generators, not
+a second API surface. `/openapi.json` serves 3.1 and only 3.1.
 
 **`/llms.txt`** — generated, never hand-written.
 
@@ -685,8 +712,16 @@ each one against the drift it targets.
 `docs/decisions/` is the authority for everything it covers. Supersede
 rather than edit — an ADR records what was decided *then*.
 
-All eleven Phase 1 ADRs are **accepted**. Anything this document says that
+All fourteen Phase 1 ADRs are **accepted**. Anything this document says that
 contradicts one is stale.
+
+0001–0011 were written in parallel, which bought speed and independence but
+could not see across itself. 0012–0014 close the three seams that only became
+visible once all eleven were read together — a pin table with no row for an
+approved dependency, a governing rule that named two files when a later
+decision required three, and two ADRs prescribing the same six lines of
+Python incompatibly. Expect that ratio again in later phases; it is the cost
+of parallel decision-making, and it is cheaper than the serial alternative.
 
 ## Still open
 
