@@ -20,11 +20,11 @@ help: ## Show this help
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@printf '\nSpec: prompt.md   Implementation chunks: tasks/README.md\n\n'
 
-parity: ## Check Go and Python templates for drift (8 checks)
-	$(call todo,parity,02-copier-scaffolding.md)
+parity: ## Check Go and Python templates for drift
+	@./scripts/parity.sh
 
 verify: ## Generate both templates, build, boot, assert, tear down
-	$(call todo,verify,02-copier-scaffolding.md)
+	@./scripts/verify-template.sh
 
 test: ## Run mint's own tests
 	$(call todo,test,02-copier-scaffolding.md)

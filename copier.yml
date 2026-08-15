@@ -1,0 +1,77 @@
+# Mint — the single template definition.
+#
+# THIS FILE MUST LIVE AT THE GIT REPO ROOT. Copier only treats a path as
+# VCS-tracked when it *is* the repo root, so a per-template copier.yml under
+# templates/go-service/ produces a service with no _commit at all, no mint
+# mark, and a `copier update` that exits 1 forever. See ADR 0009, Finding 4.
+#
+# There is exactly ONE question set. The two language trees cannot drift
+# apart because there is nothing to drift from.
+
+# --- Document 1: template mechanics + the one question that selects a tree ---
+---
+_subdirectory: "templates/[[ language ]]-service/template"
+_min_copier_version: "9.17.1"
+
+# Delimiters are NOT Jinja's defaults. Phase 2 brings GitHub Actions, whose
+# ${{ }} collides with {{ }}. Changing this later means touching every
+# template file, so it is fixed before any exist.
+_envops:
+  block_start_string: "[%"
+  block_end_string: "%]"
+  variable_start_string: "[["
+  variable_end_string: "]]"
+  comment_start_string: "[#"
+  comment_end_string: "#]"
+
+_tasks:
+  - command: "git init -q -b main ."
+    when: "[[ not _copier_conf.vcs_ref ]]"
+  - command: "go mod tidy"
+    when: "[[ language == 'go' ]]"
+  - command: "uv sync --quiet"
+    when: "[[ language == 'python' ]]"
+  - command: |
+      printf '\n  Minted %s.\n\n  Next:\n    direnv allow\n    make run\n\n  Then: make help\n\n' '[[ service_name ]]'
+
+language:
+  type: str
+  help: |
+    Which language? This selects the template tree and is recorded in
+    .copier-answers.yml. No generated file may branch on it beyond this.
+  choices:
+    Go: go
+    Python: python
+  default: go
+
+# --- Document 2: the shared question set, identical for both languages ---
+---
+!include "questions-shared.yml"
+
+# --- Document 3: the only language-conditional questions -------------------
+#
+# These two are gated on `language` and NOTHING ELSE. A new question belongs
+# in questions-shared.yml above; putting it here reintroduces exactly the
+# drift the single-file layout removed, and `make parity` asserts that only
+# these two carry a `when:`.
+---
+module_path:
+  type: str
+  when: "[[ language == 'go' ]]"
+  help: "Go module path. Must match the import path consumers will use."
+  default: "[[ repo_url ]]"
+  validator: >-
+    [% if not (module_path | regex_search('^[a-z0-9][a-z0-9._~-]*(\.[a-z]{2,})?(/[a-zA-Z0-9._~-]+)+$')) %]
+    module_path must look like a Go module path, e.g. github.com/acme/widget-svc
+    [% endif %]
+
+package_name:
+  type: str
+  when: "[[ language == 'python' ]]"
+  help: "Python package name. Importable, so underscores rather than hyphens."
+  default: "[[ service_name | replace('-', '_') ]]"
+  validator: >-
+    [% if not (package_name | regex_search('^[a-z][a-z0-9_]*$')) %]
+    package_name must be a valid Python identifier: lowercase, digits and
+    underscores, starting with a letter. Got: [[ package_name ]]
+    [% endif %]
