@@ -27,7 +27,8 @@ from widget_svc.config import Config
 from widget_svc.log import configure as configure_logging
 from widget_svc.log import logger
 from widget_svc.observability import Metrics, configure_tracing
-from widget_svc.service import Widgets
+from widget_svc.repository import memory
+from widget_svc.service import Orders, Widgets, random_id, system_clock
 
 
 @dataclass(slots=True)
@@ -90,12 +91,21 @@ def main(argv: list[str] | None = None) -> int:
         sample_ratio=config.observability.tracing.sample_ratio,
     )
 
-    widgets = Widgets()
+    # Repositories, then the services that use them, then the transport. This
+    # is the only place the three layers are named together: swapping the
+    # in-memory store for a Postgres one is a change to these two lines and
+    # nothing else.
+    widget_repo = memory.Widgets()
+    order_repo = memory.Orders()
+
+    widgets = Widgets(widget_repo, random_id, system_clock)
+    orders = Orders(order_repo, widgets, random_id, system_clock)
+
     health = Health()
     metrics = Metrics(config)
 
     try:
-        asyncio.run(serve(config, listeners(config, widgets, health, metrics), health))
+        asyncio.run(serve(config, listeners(config, widgets, orders, health, metrics), health))
     except Exception as exc:
         logger.opt(exception=exc).error("fatal")
         return 1
@@ -107,7 +117,13 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def listeners(config: Config, widgets: Widgets, health: Health, metrics: Metrics) -> list[Listener]:
+def listeners(
+    config: Config,
+    widgets: Widgets,
+    orders: Orders,
+    health: Health,
+    metrics: Metrics,
+) -> list[Listener]:
     """The listeners to run.
 
     When ``admin_port`` equals ``port`` the two apps collapse onto a single
@@ -120,7 +136,7 @@ def listeners(config: Config, widgets: Widgets, health: Health, metrics: Metrics
     final metrics scrape; collapsed onto one listener, both become
     connection-refused.
     """
-    api = create_api(config, widgets, metrics)
+    api = create_api(config, widgets, orders, metrics)
     admin = create_admin(config, health, metrics)
 
     if not config.split_listeners():

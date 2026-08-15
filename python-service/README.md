@@ -1,7 +1,7 @@
 # widget-svc (Python)
 
-A small HTTP service: two layers, structured logging, RFC 9457 errors, and an
-OpenAPI 3.1 document served with Swagger UI.
+A small HTTP service: three layers, structured logging, metrics, tracing,
+RFC 9457 errors, and an OpenAPI 3.1 document served with Swagger UI.
 
 This is one of two reference implementations in [Mint](../README.md). The Go
 service exposes the same API and the same Makefile targets; a client should not
@@ -45,31 +45,55 @@ does not. Without it, the two `lint` targets would not mean the same thing.
 
 ## Layout
 
+**One module per resource, in every layer.** Adding a resource means adding four
+modules and one line in the composition root — never inventing a convention.
+
 ```
-src/widget_svc/__main__.py      composition root — wires everything, owns signals
-src/widget_svc/config.py        the ONLY place that reads env vars or files
-src/widget_svc/log.py           the two log tiers
-src/widget_svc/errors.py        the domain error taxonomy
-src/widget_svc/service.py       business logic and the widget store
-src/widget_svc/api/             routers, middleware, problem+json, health
-config/config.yaml              checked-in defaults
+src/widget_svc/__main__.py        composition root — wires everything, owns signals
+
+src/widget_svc/domain/            entities and the error taxonomy
+  widget.py  order.py  errors.py  (imports nothing else in the service)
+src/widget_svc/service/           business rules; declares the repository Protocols
+  widgets.py  orders.py
+src/widget_svc/repository/memory/ repository implementations
+  widgets.py  orders.py
+src/widget_svc/api/               routers, middleware, problem+json, health
+  widgets.py  orders.py
+
+src/widget_svc/config.py          the ONLY place that reads env vars or files
+src/widget_svc/log.py             the two log tiers
+src/widget_svc/observability.py   metrics registry and tracer provider
+config/config.yaml                checked-in defaults
 ```
 
-This is *not* the Go service's directory tree transliterated. Go gets
-`cmd/` and `internal/` because that is what Go does; Python gets a flat `src/`
-package with an `api/` subpackage because that is what Python does. What matches
-between the two is the outside contract, not the file layout.
+The *layers* match the Go service; the *packaging* does not, and should not. Go
+gets `cmd/` and `internal/` because that is what Go does; Python gets a `src/`
+package because that is what Python does. What matches between the two is the
+outside contract, not the file layout.
 
 ### The layer rule
 
+Dependencies point inward. `domain/` imports nothing from the service;
+everything imports `domain/`.
+
 - **`api/`** parses a request, validates its *shape* (FastAPI does that from the
   type annotations), calls the service, and returns a model. No business logic.
-- **`service.py`** holds all business rules and the error taxonomy. It takes and
-  returns plain pydantic models — no `Request`, no FastAPI types, no driver
-  types.
+- **`service/`** holds all business rules. It takes and returns domain models —
+  no `Request`, no FastAPI types, no driver types.
+- **`repository/`** holds all persistence, behind a `Protocol`.
 
-Widgets are held in memory. A real service would define a repository protocol in
-`service.py`, implement it elsewhere, and inject it from `__main__.py`.
+**The repository `Protocol` is declared in `service/`, not in `repository/`.**
+The consumer owns the interface: the service says what it needs, and an
+implementation satisfies it structurally without either importing the other.
+`repository/memory/` is the only implementation today; a Postgres one would be a
+sibling package chosen by `__main__.py`, and nothing else would change.
+
+### One resource depending on another
+
+`orders` references `widgets`, which is the case a template has to show. The
+order service declares a `WidgetLookup` Protocol with the single method it
+needs, and `Widgets` satisfies it without knowing orders exist. Copy that rather
+than depending on the whole neighbouring service.
 
 ## API
 
@@ -78,6 +102,9 @@ Widgets are held in memory. A real service would define a repository protocol in
 | GET | `/widgets` | 200 | every widget, oldest first |
 | GET | `/widgets/{id}` | 200, 404 | |
 | POST | `/widgets` | 201, 409, 422 | 409 on a duplicate name |
+| GET | `/orders` | 200 | every order, oldest first |
+| GET | `/orders/{id}` | 200, 404 | |
+| POST | `/orders` | 201, 400, 422 | 400 if the widget does not exist |
 | GET | `/openapi.json` | 200 | OpenAPI 3.1, generated from the handlers |
 | GET | `/docs` | 200 | Swagger UI |
 | GET | `/healthz` | 200 | admin port; liveness, touches no dependency |
@@ -99,7 +126,9 @@ Errors are RFC 9457 `application/problem+json`:
 FastAPI's own 422 body is `{"detail": [...]}`, which is not RFC 9457; a
 `RequestValidationError` handler replaces it. A shape violation returns **422**,
 which is what both FastAPI and the Go service's huma do by default. A
-business-rule violation returns **400**. Every response carries an
+business-rule violation returns **400** — including ordering a widget that does
+not exist, which is a bad *reference* in a well-formed request to a route that
+does exist, not a missing `/orders` resource. Every response carries an
 `X-Request-Id` header, echoing the inbound one if there was one.
 
 ## Configuration

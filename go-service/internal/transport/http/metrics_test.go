@@ -11,7 +11,6 @@ import (
 	"github.com/jeffmgreg/widget-svc/internal/config"
 	"github.com/jeffmgreg/widget-svc/internal/logging"
 	"github.com/jeffmgreg/widget-svc/internal/observability"
-	"github.com/jeffmgreg/widget-svc/internal/service"
 )
 
 // newInstrumentedAPI builds the API with metrics wired exactly as the
@@ -28,7 +27,8 @@ func newInstrumentedAPI(t *testing.T) (http.Handler, *observability.Metrics) {
 	}
 
 	logger := logging.New(logging.Options{Level: "error", Format: "json", Output: &strings.Builder{}})
-	mux := NewAPI(cfg, service.NewWidgets(), logger)
+	widgets, orders := newTestServices(t)
+	mux := NewAPI(cfg, widgets, orders, logger)
 
 	handler := Chain(
 		mux,

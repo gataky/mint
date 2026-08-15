@@ -7,7 +7,7 @@ tests exercise the real middleware chain rather than a bare router.
 from __future__ import annotations
 
 import io
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -17,7 +17,8 @@ from widget_svc.api import create_admin, create_api
 from widget_svc.api.health import Health
 from widget_svc.config import Config
 from widget_svc.log import configure
-from widget_svc.service import Widgets
+from widget_svc.repository import memory
+from widget_svc.service import Orders, Widgets
 
 
 @pytest.fixture
@@ -41,11 +42,10 @@ def logs() -> Iterator[io.StringIO]:
     configure(fmt="console")
 
 
-@pytest.fixture
-def widgets() -> Widgets:
-    """A Widgets with a fixed clock and predictable IDs.
+def fixed_clock() -> Callable[[], datetime]:
+    """A clock that advances one second per call.
 
-    Assertions can then name exact values instead of matching patterns.
+    Ordering assertions can then name exact positions without sleeping.
     """
     counter = {"n": 0}
     base = datetime(2026, 1, 1, tzinfo=UTC)
@@ -54,15 +54,39 @@ def widgets() -> Widgets:
         counter["n"] += 1
         return base + timedelta(seconds=counter["n"])
 
-    def new_id() -> str:
-        return f"widget-{counter['n']}"
+    return now
 
-    return Widgets(now=now, new_id=new_id)
+
+def counting_ids(prefix: str) -> Callable[[], str]:
+    """Predictable identifiers."""
+    counter = {"n": 0}
+
+    def next_id() -> str:
+        counter["n"] += 1
+        return f"{prefix}-{counter['n']}"
+
+    return next_id
 
 
 @pytest.fixture
-def client(config: Config, widgets: Widgets) -> Iterator[TestClient]:
-    with TestClient(create_api(config, widgets)) as test_client:
+def widgets() -> Widgets:
+    """The widget service over an empty in-memory store.
+
+    The service tests use the real repository rather than a bespoke mock. There
+    is only one implementation, so the thing exercised is the thing that runs.
+    """
+    return Widgets(memory.Widgets(), counting_ids("widget"), fixed_clock())
+
+
+@pytest.fixture
+def orders(widgets: Widgets) -> Orders:
+    """The order service, sharing the widget service it must consult."""
+    return Orders(memory.Orders(), widgets, counting_ids("order"), fixed_clock())
+
+
+@pytest.fixture
+def client(config: Config, widgets: Widgets, orders: Orders) -> Iterator[TestClient]:
+    with TestClient(create_api(config, widgets, orders)) as test_client:
         yield test_client
 
 

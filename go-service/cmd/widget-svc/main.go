@@ -17,6 +17,7 @@ import (
 	"github.com/jeffmgreg/widget-svc/internal/config"
 	"github.com/jeffmgreg/widget-svc/internal/logging"
 	"github.com/jeffmgreg/widget-svc/internal/observability"
+	"github.com/jeffmgreg/widget-svc/internal/repository/memory"
 	"github.com/jeffmgreg/widget-svc/internal/service"
 	transport "github.com/jeffmgreg/widget-svc/internal/transport/http"
 )
@@ -76,7 +77,16 @@ func run() error {
 			slog.String("expectation", "authentication is handled by an upstream gateway or mesh"))
 	}
 
-	widgets := service.NewWidgets()
+	// Repositories, then the services that use them, then the transport. This
+	// is the only place the three layers are named together: swapping the
+	// in-memory store for a Postgres one is a change to these two lines and
+	// nothing else.
+	widgetRepo := memory.NewWidgets()
+	orderRepo := memory.NewOrders()
+
+	widgets := service.NewWidgets(widgetRepo, service.RandomID, service.SystemClock)
+	orders := service.NewOrders(orderRepo, widgets, service.RandomID, service.SystemClock)
+
 	health := transport.NewHealth()
 
 	metrics, err := observability.NewMetrics(cfg)
@@ -94,7 +104,7 @@ func run() error {
 		slog.Float64("sample_ratio", cfg.Observability.Tracing.SampleRatio),
 	)
 
-	apiMux := transport.NewAPI(cfg, widgets, logger)
+	apiMux := transport.NewAPI(cfg, widgets, orders, logger)
 	resolve := transport.MuxResolver(apiMux)
 	api := transport.Chain(
 		apiMux,

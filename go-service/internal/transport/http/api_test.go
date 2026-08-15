@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	"github.com/jeffmgreg/widget-svc/internal/config"
+	"github.com/jeffmgreg/widget-svc/internal/domain"
 	"github.com/jeffmgreg/widget-svc/internal/logging"
-	"github.com/jeffmgreg/widget-svc/internal/service"
 )
 
 // newTestAPI builds the API exactly as the composition root does, so the tests
@@ -30,7 +30,8 @@ func newTestAPI(t *testing.T) (http.Handler, *bytes.Buffer) {
 	})
 
 	cfg := config.Defaults()
-	mux := NewAPI(cfg, service.NewWidgets(), logger)
+	widgets, orders := newTestServices(t)
+	mux := NewAPI(cfg, widgets, orders, logger)
 	handler := Chain(
 		mux,
 		Recovery(logger),
@@ -75,7 +76,7 @@ func TestCreateAndFetchWidget(t *testing.T) {
 		t.Fatalf("POST /widgets = %d, want %d: %s", created.Code, http.StatusCreated, created.Body)
 	}
 
-	widget := decode[service.Widget](t, created)
+	widget := decode[domain.Widget](t, created)
 	if widget.ID == "" {
 		t.Fatal("POST /widgets returned a widget with no ID")
 	}
@@ -87,7 +88,7 @@ func TestCreateAndFetchWidget(t *testing.T) {
 	if fetched.Code != http.StatusOK {
 		t.Fatalf("GET /widgets/{id} = %d, want %d: %s", fetched.Code, http.StatusOK, fetched.Body)
 	}
-	if got := decode[service.Widget](t, fetched); got.ID != widget.ID {
+	if got := decode[domain.Widget](t, fetched); got.ID != widget.ID {
 		t.Errorf("GET /widgets/{id} returned ID %q, want %q", got.ID, widget.ID)
 	}
 }

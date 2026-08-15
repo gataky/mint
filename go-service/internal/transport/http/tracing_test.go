@@ -15,7 +15,6 @@ import (
 
 	"github.com/jeffmgreg/widget-svc/internal/config"
 	"github.com/jeffmgreg/widget-svc/internal/logging"
-	"github.com/jeffmgreg/widget-svc/internal/service"
 )
 
 // newTracedAPI builds the API with tracing wired as the composition root does,
@@ -45,7 +44,8 @@ func newTracedAPI(t *testing.T) (http.Handler, *tracetest.SpanRecorder, *bytes.B
 	})
 
 	cfg := config.Defaults()
-	mux := NewAPI(cfg, service.NewWidgets(), logger)
+	widgets, orders := newTestServices(t)
+	mux := NewAPI(cfg, widgets, orders, logger)
 	resolve := MuxResolver(mux)
 
 	handler := Chain(mux,

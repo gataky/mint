@@ -1,62 +1,44 @@
-package service
+package service_test
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"testing"
-	"time"
-)
 
-// newTestWidgets returns a Widgets with a fixed clock and predictable IDs, so
-// assertions can name exact values instead of matching patterns.
-func newTestWidgets() *Widgets {
-	var n int
-	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	return &Widgets{
-		items: map[string]Widget{},
-		now: func() time.Time {
-			n++
-			return base.Add(time.Duration(n) * time.Second)
-		},
-		newID: func() string {
-			return fmt.Sprintf("widget-%d", n)
-		},
-	}
-}
+	"github.com/jeffmgreg/widget-svc/internal/domain"
+)
 
 func TestCreateWidget(t *testing.T) {
 	tests := []struct {
 		name      string
-		input     NewWidget
+		input     domain.NewWidget
 		wantName  string
-		wantError Category
+		wantError domain.Category
 	}{
 		{
 			name:     "valid",
-			input:    NewWidget{Name: "sprocket", Color: "red"},
+			input:    domain.NewWidget{Name: "sprocket", Color: "red"},
 			wantName: "sprocket",
 		},
 		{
 			name:     "trims surrounding whitespace",
-			input:    NewWidget{Name: "  sprocket  ", Color: "blue"},
+			input:    domain.NewWidget{Name: "  sprocket  ", Color: "blue"},
 			wantName: "sprocket",
 		},
 		{
 			name:      "blank name is invalid",
-			input:     NewWidget{Name: "   ", Color: "red"},
-			wantError: CategoryInvalid,
+			input:     domain.NewWidget{Name: "   ", Color: "red"},
+			wantError: domain.CategoryInvalid,
 		},
 		{
 			name:      "unknown color is invalid",
-			input:     NewWidget{Name: "sprocket", Color: "puce"},
-			wantError: CategoryInvalid,
+			input:     domain.NewWidget{Name: "sprocket", Color: "puce"},
+			wantError: domain.CategoryInvalid,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			widgets := newTestWidgets()
+			widgets := newWidgets(t)
 
 			got, err := widgets.Create(t.Context(), tt.input)
 
@@ -64,7 +46,7 @@ func TestCreateWidget(t *testing.T) {
 				if err == nil {
 					t.Fatalf("Create(%+v) = %+v, want error category %q", tt.input, got, tt.wantError)
 				}
-				if category := CategoryOf(err); category != tt.wantError {
+				if category := domain.CategoryOf(err); category != tt.wantError {
 					t.Fatalf("Create(%+v) error category = %q, want %q", tt.input, category, tt.wantError)
 				}
 				return
@@ -87,28 +69,28 @@ func TestCreateWidget(t *testing.T) {
 }
 
 func TestCreateWidgetRejectsDuplicateName(t *testing.T) {
-	widgets := newTestWidgets()
+	widgets := newWidgets(t)
 	ctx := t.Context()
 
-	if _, err := widgets.Create(ctx, NewWidget{Name: "sprocket", Color: "red"}); err != nil {
+	if _, err := widgets.Create(ctx, domain.NewWidget{Name: "sprocket", Color: "red"}); err != nil {
 		t.Fatalf("first Create returned unexpected error: %v", err)
 	}
 
 	// The duplicate check is case-insensitive, so this must collide.
-	_, err := widgets.Create(ctx, NewWidget{Name: "SPROCKET", Color: "blue"})
+	_, err := widgets.Create(ctx, domain.NewWidget{Name: "SPROCKET", Color: "blue"})
 	if err == nil {
 		t.Fatal("second Create with a duplicate name succeeded, want a conflict")
 	}
-	if category := CategoryOf(err); category != CategoryConflict {
-		t.Errorf("duplicate name error category = %q, want %q", category, CategoryConflict)
+	if category := domain.CategoryOf(err); category != domain.CategoryConflict {
+		t.Errorf("duplicate name error category = %q, want %q", category, domain.CategoryConflict)
 	}
 }
 
 func TestGetWidget(t *testing.T) {
-	widgets := newTestWidgets()
+	widgets := newWidgets(t)
 	ctx := t.Context()
 
-	created, err := widgets.Create(ctx, NewWidget{Name: "sprocket", Color: "red"})
+	created, err := widgets.Create(ctx, domain.NewWidget{Name: "sprocket", Color: "red"})
 	if err != nil {
 		t.Fatalf("Create returned unexpected error: %v", err)
 	}
@@ -128,18 +110,18 @@ func TestGetWidget(t *testing.T) {
 		if err == nil {
 			t.Fatal("Get with an unknown ID succeeded, want not_found")
 		}
-		if category := CategoryOf(err); category != CategoryNotFound {
-			t.Errorf("Get error category = %q, want %q", category, CategoryNotFound)
+		if category := domain.CategoryOf(err); category != domain.CategoryNotFound {
+			t.Errorf("Get error category = %q, want %q", category, domain.CategoryNotFound)
 		}
 	})
 }
 
 func TestListWidgetsIsOrderedOldestFirst(t *testing.T) {
-	widgets := newTestWidgets()
+	widgets := newWidgets(t)
 	ctx := t.Context()
 
 	for _, name := range []string{"first", "second", "third"} {
-		if _, err := widgets.Create(ctx, NewWidget{Name: name, Color: "red"}); err != nil {
+		if _, err := widgets.Create(ctx, domain.NewWidget{Name: name, Color: "red"}); err != nil {
 			t.Fatalf("Create(%q) returned unexpected error: %v", name, err)
 		}
 	}
@@ -159,9 +141,9 @@ func TestListWidgetsIsOrderedOldestFirst(t *testing.T) {
 }
 
 func TestListWidgetsIsEmptyNotNil(t *testing.T) {
-	// A nil slice serializes as JSON null; an empty one as []. The API
-	// contract promises a list, so this must not regress.
-	got, err := newTestWidgets().List(t.Context())
+	// A nil slice serializes as JSON null; an empty one as []. The API contract
+	// promises a list, so this must not regress.
+	got, err := newWidgets(t).List(t.Context())
 	if err != nil {
 		t.Fatalf("List returned unexpected error: %v", err)
 	}
@@ -173,28 +155,8 @@ func TestListWidgetsIsEmptyNotNil(t *testing.T) {
 	}
 }
 
-func TestCategoryOfUnknownErrorIsInternal(t *testing.T) {
-	// Anything that is not a domain error is an internal one — the transport
-	// must never turn an unexpected failure into a 4xx.
-	if category := CategoryOf(errors.New("boom")); category != CategoryInternal {
-		t.Errorf("CategoryOf(plain error) = %q, want %q", category, CategoryInternal)
-	}
-}
-
-func TestInternalErrorKeepsCauseUnexported(t *testing.T) {
-	cause := errors.New("connection refused")
-	err := Internal(cause, "could not reach the store")
-
-	if !errors.Is(err, cause) {
-		t.Error("Internal did not wrap its cause; errors.Is could not find it")
-	}
-	if CategoryOf(err) != CategoryInternal {
-		t.Errorf("CategoryOf(Internal) = %q, want %q", CategoryOf(err), CategoryInternal)
-	}
-}
-
-func TestOperationsRespectContextCancellation(t *testing.T) {
-	widgets := newTestWidgets()
+func TestWidgetOperationsRespectContextCancellation(t *testing.T) {
+	widgets := newWidgets(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -204,7 +166,7 @@ func TestOperationsRespectContextCancellation(t *testing.T) {
 	if _, err := widgets.Get(ctx, "any"); err == nil {
 		t.Error("Get on a cancelled context succeeded, want an error")
 	}
-	if _, err := widgets.Create(ctx, NewWidget{Name: "x", Color: "red"}); err == nil {
+	if _, err := widgets.Create(ctx, domain.NewWidget{Name: "x", Color: "red"}); err == nil {
 		t.Error("Create on a cancelled context succeeded, want an error")
 	}
 }

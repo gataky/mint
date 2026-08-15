@@ -1,0 +1,91 @@
+package memory
+
+import (
+	"context"
+	"slices"
+	"strings"
+	"sync"
+
+	"github.com/jeffmgreg/widget-svc/internal/domain"
+)
+
+// Widgets is an in-memory widget store.
+type Widgets struct {
+	mu    sync.RWMutex
+	items map[string]domain.Widget
+}
+
+// NewWidgets returns an empty widget store.
+func NewWidgets() *Widgets {
+	return &Widgets{items: map[string]domain.Widget{}}
+}
+
+// List returns every widget, oldest first.
+func (w *Widgets) List(ctx context.Context) ([]domain.Widget, error) {
+	if err := checkContext(ctx); err != nil {
+		return nil, err
+	}
+
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	// Non-nil even when empty: a nil slice serializes as JSON null, and the API
+	// promises a list.
+	out := make([]domain.Widget, 0, len(w.items))
+	for _, widget := range w.items {
+		out = append(out, widget)
+	}
+	slices.SortFunc(out, func(a, b domain.Widget) int {
+		if c := a.CreatedAt.Compare(b.CreatedAt); c != 0 {
+			return c
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	return out, nil
+}
+
+// Get returns one widget by ID.
+func (w *Widgets) Get(ctx context.Context, id string) (domain.Widget, error) {
+	if err := checkContext(ctx); err != nil {
+		return domain.Widget{}, err
+	}
+
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	widget, ok := w.items[id]
+	if !ok {
+		return domain.Widget{}, domain.NotFound("no widget with id %q", id)
+	}
+	return widget, nil
+}
+
+// FindByName returns the widget with this name, case-insensitively.
+func (w *Widgets) FindByName(ctx context.Context, name string) (domain.Widget, error) {
+	if err := checkContext(ctx); err != nil {
+		return domain.Widget{}, err
+	}
+
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	for _, widget := range w.items {
+		if strings.EqualFold(widget.Name, name) {
+			return widget, nil
+		}
+	}
+	return domain.Widget{}, domain.NotFound("no widget named %q", name)
+}
+
+// Create stores a widget.
+func (w *Widgets) Create(ctx context.Context, widget domain.Widget) error {
+	if err := checkContext(ctx); err != nil {
+		return err
+	}
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	w.items[widget.ID] = widget
+	return nil
+}

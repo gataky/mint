@@ -20,24 +20,48 @@ globally — use `go tool <name>`.
 
 ## Architecture
 
-Two layers, plus a composition root.
+Three layers, plus a composition root. Dependencies point inward: `domain`
+imports nothing else in the service.
 
 ```
-cmd/widget-svc/main.go     wires everything; owns signals; no business logic
-internal/transport/http/   handlers, middleware, error mapping, listeners
-internal/service/          business rules, the error taxonomy, the widget store
-internal/config/           the ONLY place that reads env vars or files
-internal/logging/          the two log tiers
+cmd/widget-svc/main.go       wires everything; owns signals; no business logic
+internal/domain/             entities and the error taxonomy
+internal/service/            business rules; declares the repository interfaces
+internal/repository/memory/  repository implementations
+internal/transport/http/     handlers, middleware, error mapping, listeners
+internal/config/             the ONLY place that reads env vars or files
+internal/logging/            the two log tiers
+internal/observability/      metrics registry and tracer provider
 ```
 
-**Transport** parses and validates *shape*, calls the service, serializes.
-**Service** owns all business rules and takes/returns plain Go types.
+**One file per resource in each layer.** `widget.go` and `order.go` appear in
+all four; that is the convention, not a coincidence.
+
+The repository interface is declared in `internal/service` — the consumer owns
+the interface — and satisfied by `internal/repository/memory`.
+
+## Adding a resource
+
+Four files and one line, in this order:
+
+1. `internal/domain/<name>.go` — the entity and its input type.
+2. `internal/service/<name>.go` — the repository interface this service needs,
+   and the business rules. Return domain errors, never HTTP statuses.
+3. `internal/repository/memory/<name>.go` — the implementation.
+4. `internal/transport/http/<name>.go` — the operations, and a
+   `register<Name>s` function.
+5. Wire it in `cmd/widget-svc/main.go` and call `register<Name>s` in
+   `NewAPI`.
+
+If the new resource needs an existing one, declare a **narrow interface** for
+just the methods you use — see `service.WidgetLookup` — rather than depending on
+the whole neighbouring service.
 
 ## Adding an operation
 
-Everything about an operation is declared in one `huma.Register` call in
-`internal/transport/http/api.go`. The router and `/openapi.json` both read it,
-so there is no second place to update.
+Everything about an operation is declared in one `huma.Register` call in that
+resource's file under `internal/transport/http/`. The router and
+`/openapi.json` both read it, so there is no second place to update.
 
 ```go
 huma.Register(api, huma.Operation{
@@ -55,10 +79,11 @@ huma.Register(api, huma.Operation{
 })
 ```
 
-1. Add the business logic to `internal/service`, returning a domain error from
-   `errors.go` (`NotFound`, `Invalid`, `Conflict`, `Internal`) — never an HTTP
-   status.
-2. Add input/output structs in `api.go`. Placement comes from struct tags:
+1. Add the business logic to that resource's file in `internal/service`,
+   returning a domain error from `internal/domain/errors.go` (`NotFound`,
+   `Invalid`, `Conflict`, `Internal`) — never an HTTP status.
+2. Add input/output structs in that resource's transport file. Placement comes
+   from struct tags:
    `path:`, `query:`, `header:`, or a `Body` field. Constraints come from
    `minLength:`, `maxLength:`, `enum:`, `format:`. Descriptions come from `doc:`.
 3. Return errors through `problem(ctx, err)`, which maps the category to a
@@ -69,8 +94,14 @@ huma.Register(api, huma.Operation{
 
 - **Don't read an environment variable outside `internal/config`.** `make lint`
   fails on it. `make config` is only truthful because there is one reader.
-- **Don't name an HTTP status in `internal/service`.** Return a category; the
-  transport owns the mapping table in `errors.go`.
+- **Don't name an HTTP status in `internal/service` or `internal/domain`.**
+  Return a category; the transport owns the mapping table in `errors.go`.
+- **Don't let `internal/domain` import anything else in the service.** It is the
+  innermost layer; an import pointing outward from it is the layering breaking.
+- **Don't declare a repository interface in `internal/repository`.** The
+  consumer owns it: it belongs in the service package that calls it.
+- **Don't depend on a whole neighbouring service.** Declare a narrow interface
+  with the methods you actually use.
 - **Don't return a raw error from a handler.** Route it through `problem(ctx, err)`
   or huma writes a bare 500 with no RFC 9457 fields.
 - **Don't let a driver error or stack trace reach the response.** Internal

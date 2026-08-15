@@ -10,8 +10,8 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/jeffmgreg/widget-svc/internal/domain"
 	"github.com/jeffmgreg/widget-svc/internal/logging"
-	"github.com/jeffmgreg/widget-svc/internal/service"
 )
 
 // ProblemContentType is the RFC 9457 media type. Every error response uses it.
@@ -24,17 +24,17 @@ const DefaultProblemType = "about:blank"
 
 // statusFor maps the domain's error taxonomy onto HTTP. This table is the
 // transport's business; the service layer never names a status code.
-func statusFor(category service.Category) int {
+func statusFor(category domain.Category) int {
 	switch category {
-	case service.CategoryInvalid:
+	case domain.CategoryInvalid:
 		return http.StatusBadRequest
-	case service.CategoryNotFound:
+	case domain.CategoryNotFound:
 		return http.StatusNotFound
-	case service.CategoryConflict:
+	case domain.CategoryConflict:
 		return http.StatusConflict
-	case service.CategoryUnauthorized:
+	case domain.CategoryUnauthorized:
 		return http.StatusUnauthorized
-	case service.CategoryForbidden:
+	case domain.CategoryForbidden:
 		return http.StatusForbidden
 	default:
 		return http.StatusInternalServerError
@@ -46,7 +46,7 @@ func statusFor(category service.Category) int {
 // A driver error, a wrapped cause, or a stack trace never crosses this
 // boundary: the detail is logged here and the client is told the category.
 func problem(ctx context.Context, err error) error {
-	category := service.CategoryOf(err)
+	category := domain.CategoryOf(err)
 	status := statusFor(category)
 
 	// A blown request deadline is a timeout, not an internal failure. The
@@ -64,7 +64,7 @@ func problem(ctx context.Context, err error) error {
 	}
 
 	message := "an unexpected error occurred"
-	if category == service.CategoryInternal {
+	if category == domain.CategoryInternal {
 		// The cause is recorded here and goes no further. Driver errors and
 		// stack traces never cross this boundary: log the detail, return the
 		// category.
@@ -74,9 +74,9 @@ func problem(ctx context.Context, err error) error {
 		)
 	} else {
 		message = err.Error()
-		var domain *service.Error
-		if errors.As(err, &domain) {
-			message = domain.Message
+		var domainErr *domain.Error
+		if errors.As(err, &domainErr) {
+			message = domainErr.Message
 		}
 	}
 

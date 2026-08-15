@@ -7,6 +7,7 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from starlette.middleware import Middleware
 
 from widget_svc.api import health as health_routes
+from widget_svc.api import orders as order_routes
 from widget_svc.api import problem, widgets
 from widget_svc.api.health import Health
 from widget_svc.api.middleware import (
@@ -18,12 +19,17 @@ from widget_svc.api.middleware import (
 from widget_svc.config import Config
 from widget_svc.observability import CONTENT_TYPE as METRICS_CONTENT_TYPE
 from widget_svc.observability import Metrics
-from widget_svc.service import Widgets
+from widget_svc.service import Orders, Widgets
 
 __all__ = ["create_admin", "create_api"]
 
 
-def create_api(config: Config, service: Widgets, metrics: Metrics | None = None) -> FastAPI:
+def create_api(
+    config: Config,
+    widget_service: Widgets,
+    order_service: Orders,
+    metrics: Metrics | None = None,
+) -> FastAPI:
     """The public API: the widget routes, OpenAPI 3.1, and Swagger UI at /docs.
 
     metrics may be None, which omits the instrumentation — useful in tests that
@@ -56,8 +62,13 @@ def create_api(config: Config, service: Widgets, metrics: Metrics | None = None)
         redoc_url=None,
     )
 
-    app.state.widgets = service
+    app.state.widgets = widget_service
+    app.state.orders = order_service
+
+    # One router per resource. Each lives in its own module alongside this one.
     app.include_router(widgets.router)
+    app.include_router(order_routes.router)
+
     problem.install(app)
 
     # Adds OpenTelemetryMiddleware at the outside of the stack, so the spans it

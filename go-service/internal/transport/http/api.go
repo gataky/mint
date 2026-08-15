@@ -8,7 +8,6 @@
 package http
 
 import (
-	"context"
 	"log/slog"
 	"net/http"
 
@@ -19,13 +18,13 @@ import (
 	"github.com/jeffmgreg/widget-svc/internal/service"
 )
 
-// NewAPI builds the public API handler: the widget operations, the OpenAPI 3.1
-// document at /openapi.json, and Swagger UI at /docs.
+// NewAPI builds the public API handler: every resource's operations, the
+// OpenAPI 3.1 document at /openapi.json, and Swagger UI at /docs.
 //
 // It returns the concrete *http.ServeMux rather than an http.Handler so the
 // middleware can ask it to resolve a route template before dispatch — see
 // MuxResolver.
-func NewAPI(cfg config.Config, widgets *service.Widgets, logger *slog.Logger) *http.ServeMux {
+func NewAPI(cfg config.Config, widgets *service.Widgets, orders *service.Orders, logger *slog.Logger) *http.ServeMux {
 	configureErrorModel()
 
 	mux := http.NewServeMux()
@@ -43,7 +42,9 @@ func NewAPI(cfg config.Config, widgets *service.Widgets, logger *slog.Logger) *h
 
 	api := humago.New(mux, humaCfg)
 
+	// One call per resource. Each lives in its own file alongside this one.
 	registerWidgets(api, widgets)
+	registerOrders(api, orders)
 
 	// Anything that matches no route still gets a problem+json body rather than
 	// net/http's plain-text "404 page not found".
@@ -69,71 +70,4 @@ func configureErrorModel() {
 		}
 		return err
 	}
-}
-
-type listWidgetsOutput struct {
-	Body []service.Widget
-}
-
-type getWidgetInput struct {
-	ID string `path:"id" minLength:"1" maxLength:"64" doc:"Widget identifier."`
-}
-
-type widgetOutput struct {
-	Body service.Widget
-}
-
-type createWidgetInput struct {
-	Body service.NewWidget
-}
-
-// registerWidgets wires the widget operations. Each one is declared once here:
-// the router and the OpenAPI document both read this, so there is no second
-// place to update when an operation changes.
-func registerWidgets(api huma.API, widgets *service.Widgets) {
-	huma.Register(api, huma.Operation{
-		OperationID: "widgets.list",
-		Method:      http.MethodGet,
-		Path:        "/widgets",
-		Summary:     "List widgets",
-		Description: "Returns every widget, oldest first.",
-		Tags:        []string{"widgets"},
-	}, func(ctx context.Context, _ *struct{}) (*listWidgetsOutput, error) {
-		found, err := widgets.List(ctx)
-		if err != nil {
-			return nil, problem(ctx, err)
-		}
-		return &listWidgetsOutput{Body: found}, nil
-	})
-
-	huma.Register(api, huma.Operation{
-		OperationID: "widgets.get",
-		Method:      http.MethodGet,
-		Path:        "/widgets/{id}",
-		Summary:     "Fetch a widget by ID",
-		Tags:        []string{"widgets"},
-		Errors:      []int{http.StatusNotFound},
-	}, func(ctx context.Context, in *getWidgetInput) (*widgetOutput, error) {
-		found, err := widgets.Get(ctx, in.ID)
-		if err != nil {
-			return nil, problem(ctx, err)
-		}
-		return &widgetOutput{Body: found}, nil
-	})
-
-	huma.Register(api, huma.Operation{
-		OperationID:   "widgets.create",
-		Method:        http.MethodPost,
-		Path:          "/widgets",
-		Summary:       "Create a widget",
-		Tags:          []string{"widgets"},
-		DefaultStatus: http.StatusCreated,
-		Errors:        []int{http.StatusBadRequest, http.StatusConflict},
-	}, func(ctx context.Context, in *createWidgetInput) (*widgetOutput, error) {
-		created, err := widgets.Create(ctx, in.Body)
-		if err != nil {
-			return nil, problem(ctx, err)
-		}
-		return &widgetOutput{Body: created}, nil
-	})
 }

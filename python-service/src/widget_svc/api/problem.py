@@ -23,7 +23,7 @@ from starlette.status import (
     HTTP_500_INTERNAL_SERVER_ERROR,
 )
 
-from widget_svc.errors import Category, ServiceError
+from widget_svc.domain import Category, ServiceError
 from widget_svc.log import logger
 
 #: The RFC 9457 media type. Every error response uses it.

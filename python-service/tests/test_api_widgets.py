@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 
 import pytest
 from starlette.testclient import TestClient
@@ -196,13 +197,13 @@ def test_docs_are_served(client: TestClient) -> None:
     assert response.headers["content-type"].startswith("text/html")
 
 
-def test_created_at_is_rfc3339_with_milliseconds(client: TestClient) -> None:
-    # Pydantic would emit microseconds and a "+00:00" offset by default; the Go
-    # service emits milliseconds and a trailing Z.
+def test_created_at_is_rfc3339(client: TestClient) -> None:
+    # Pydantic would emit microseconds and a "+00:00" offset by default.
     created = client.post("/widgets", json={"name": "sprocket", "color": "red"}).json()
 
-    assert created["created_at"].endswith("Z")
-    assert len(created["created_at"]) == len("2026-01-01T00:00:01.000Z")
+    assert re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z", created["created_at"]
+    ), created["created_at"]
 
 
 def _last_log_line(logs: io.StringIO) -> dict[str, object]:

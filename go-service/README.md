@@ -1,7 +1,7 @@
 # widget-svc (Go)
 
-A small HTTP service: three layers, structured logging, RFC 9457 errors, and an
-OpenAPI 3.1 document served with Swagger UI.
+A small HTTP service: three layers, structured logging, metrics, tracing,
+RFC 9457 errors, and an OpenAPI 3.1 document served with Swagger UI.
 
 This is one of two reference implementations in [Mint](../README.md). The Python
 service exposes the same API and the same Makefile targets; a client should not
@@ -41,13 +41,25 @@ Linters and formatters are pinned in `go.mod` as `tool` directives and run via
 
 ## Layout
 
+**One file per resource, in every layer.** Adding a resource means adding four
+files and one line in the composition root — never inventing a convention.
+
 ```
-cmd/widget-svc/main.go          composition root — wires everything, owns signals
-internal/config/                the ONLY place that reads env vars or files
-internal/logging/               the two log tiers
-internal/service/               business logic and the error taxonomy
-internal/transport/http/        handlers, middleware, error mapping, listeners
-config/config.yaml              checked-in defaults
+cmd/widget-svc/main.go            composition root — wires everything, owns signals
+
+internal/domain/                  entities and the error taxonomy
+  widget.go  order.go             (imports nothing else in the service)
+internal/service/                 business rules; declares the repository interfaces
+  widget.go  order.go
+internal/repository/memory/       repository implementations
+  widget.go  order.go
+internal/transport/http/          handlers, middleware, error mapping, listeners
+  widget.go  order.go
+
+internal/config/                  the ONLY place that reads env vars or files
+internal/logging/                 the two log tiers
+internal/observability/           metrics registry and tracer provider
+config/config.yaml                checked-in defaults
 ```
 
 `internal/transport/http/` nests deliberately. There is one transport today; the
@@ -55,13 +67,28 @@ nesting is what makes a second one an addition rather than a refactor.
 
 ### The layer rule
 
+Dependencies point inward. `domain` imports nothing from the service; everything
+imports `domain`.
+
 - **Transport** parses a request, validates its *shape*, calls the service, and
   serializes the result. No business logic.
-- **Service** holds all business rules and the error taxonomy. It takes and
-  returns plain Go types — no `http.Request`, no huma types, no driver types.
+- **Service** holds all business rules. It takes and returns domain types — no
+  `http.Request`, no huma types, no driver types.
+- **Repository** holds all persistence, behind an interface.
 
-Widgets are held in memory. A real service would define a repository interface
-in `internal/service`, implement it elsewhere, and inject it from `main.go`.
+**The repository interface is declared in `internal/service`, not in
+`internal/repository`.** The consumer owns the interface in Go: the service says
+what it needs, and an implementation satisfies it without either importing the
+other. `internal/repository/memory` is the only implementation today; a Postgres
+one would be a sibling package chosen by `main.go`, and nothing else would
+change.
+
+### One resource depending on another
+
+`orders` references `widgets`, which is the case a template has to show. The
+order service declares a `WidgetLookup` interface with the single method it
+needs, and `*service.Widgets` satisfies it without knowing orders exist. Copy
+that rather than depending on the whole neighbouring service.
 
 ## API
 
@@ -70,6 +97,9 @@ in `internal/service`, implement it elsewhere, and inject it from `main.go`.
 | GET | `/widgets` | 200 | every widget, oldest first |
 | GET | `/widgets/{id}` | 200, 404 | |
 | POST | `/widgets` | 201, 409, 422 | 409 on a duplicate name |
+| GET | `/orders` | 200 | every order, oldest first |
+| GET | `/orders/{id}` | 200, 404 | |
+| POST | `/orders` | 201, 400, 422 | 400 if the widget does not exist |
 | GET | `/openapi.json` | 200 | OpenAPI 3.1, generated from the handlers |
 | GET | `/docs` | 200 | Swagger UI |
 | GET | `/healthz` | 200 | admin port; liveness, touches no dependency |
@@ -89,7 +119,9 @@ Errors are RFC 9457 `application/problem+json`:
 ```
 
 A shape violation returns **422**, which is what both huma and FastAPI do by
-default. A business-rule violation returns **400**. Every response carries an
+default. A business-rule violation returns **400** — including ordering a widget
+that does not exist, which is a bad *reference* in a well-formed request to a
+route that does exist, not a missing `/orders` resource. Every response carries an
 `X-Request-Id` header, echoing the inbound one if there was one.
 
 ## Configuration

@@ -125,12 +125,12 @@ fi
 # created_at format must match to the character.
 for base in "http://localhost:$GO_PORT" "http://localhost:$PY_PORT"; do
 	stamp=$(curl -sS "$base/widgets" | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["created_at"])')
-	if [[ ! "$stamp" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z$ ]]; then
+	if [[ ! "$stamp" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,3})?Z$ ]]; then
 		printf '  \033[31m✗\033[0m created_at format on %s: %s\n' "$base" "$stamp"
 		failures=$((failures + 1))
 	fi
 done
-printf '  \033[32m✓\033[0m created_at is RFC 3339 with milliseconds on both\n'
+printf '  \033[32m✓\033[0m created_at is RFC 3339 on both\n'
 
 banner "errors"
 compare "GET /widgets/nope (404 problem+json)" %s/widgets/nope

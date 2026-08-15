@@ -2,7 +2,7 @@
 
 Handlers parse a request, validate its *shape* (FastAPI does that from the type
 annotations), call the service layer, and return a model. Business rules live in
-:mod:`widget_svc.service`, not here.
+``service/widgets.py``, not here.
 """
 
 from __future__ import annotations
@@ -12,7 +12,8 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Path, Request, status
 
 from widget_svc.api.problem import PROBLEM_CONTENT_TYPE
-from widget_svc.service import NewWidget, Widget, Widgets
+from widget_svc.domain import NewWidget, Widget
+from widget_svc.service import Widgets
 
 
 def get_widgets(request: Request) -> Widgets:
@@ -28,7 +29,7 @@ _PROBLEM: dict[str, Any] = {"content": {PROBLEM_CONTENT_TYPE: {}}}
 
 # Starlette matches routes in registration order, unlike Go's ServeMux, which
 # picks the most specific match. If a literal subpath is ever added — say
-# /widgets/search — it must be registered BEFORE /widgets/{widget_id}, or the
+# /widgets/search — it must be registered BEFORE /widgets/{id}, or the
 # parameterised route swallows it.
 router = APIRouter(prefix="/widgets", tags=["widgets"])
 

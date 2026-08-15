@@ -13,7 +13,7 @@ from widget_svc.api.health import Health
 from widget_svc.api.route import UNMATCHED_ROUTE
 from widget_svc.config import Config
 from widget_svc.observability import DURATION_BUCKETS, Metrics
-from widget_svc.service import Widgets
+from widget_svc.service import Orders, Widgets
 
 
 @pytest.fixture
@@ -24,9 +24,9 @@ def metrics() -> Metrics:
 
 
 @pytest.fixture
-def instrumented(metrics: Metrics, widgets: Widgets) -> Iterator[TestClient]:
+def instrumented(metrics: Metrics, widgets: Widgets, orders: Orders) -> Iterator[TestClient]:
     """The API with metrics wired exactly as the composition root does."""
-    with TestClient(create_api(Config(), widgets, metrics)) as client:
+    with TestClient(create_api(Config(), widgets, orders, metrics)) as client:
         yield client
 
 
@@ -100,9 +100,9 @@ def test_active_requests_returns_to_zero(instrumented: TestClient, metrics: Metr
 
 
 def test_active_requests_is_decremented_after_an_unhandled_exception(
-    metrics: Metrics, widgets: Widgets
+    metrics: Metrics, widgets: Widgets, orders: Orders
 ) -> None:
-    app = create_api(Config(), widgets, metrics)
+    app = create_api(Config(), widgets, orders, metrics)
 
     @app.get("/boom")
     async def boom() -> None:

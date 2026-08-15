@@ -1,11 +1,18 @@
-"""Business logic: rules and error categories."""
+"""Widget business logic: rules and error categories."""
 
 from __future__ import annotations
 
 import pytest
 
-from widget_svc.errors import Category, ConflictError, InvalidError, NotFoundError, ServiceError
-from widget_svc.service import NewWidget, Widgets
+from widget_svc.domain import (
+    Category,
+    ConflictError,
+    InvalidError,
+    NewWidget,
+    NotFoundError,
+    ServiceError,
+)
+from widget_svc.service import Widgets
 
 
 @pytest.mark.parametrize(
@@ -80,3 +87,28 @@ def test_shape_violations_are_rejected_before_the_service_sees_them() -> None:
     # is what produces the 422 rather than a 400.
     with pytest.raises(ValueError, match="color"):
         NewWidget(name="sprocket", color="puce")  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("microsecond", "expected"),
+    [
+        pytest.param(0, "2026-01-01T00:00:00Z", id="no fraction is omitted entirely"),
+        pytest.param(10_000, "2026-01-01T00:00:00.01Z", id="trailing zeros are trimmed"),
+        pytest.param(123_000, "2026-01-01T00:00:00.123Z", id="three digits"),
+        pytest.param(100_000, "2026-01-01T00:00:00.1Z", id="one digit"),
+        pytest.param(5_000, "2026-01-01T00:00:00.005Z", id="leading zeros are kept"),
+        pytest.param(123_456, "2026-01-01T00:00:00.123Z", id="sub-millisecond is truncated"),
+    ],
+)
+def test_rfc3339_matches_go(microsecond: int, expected: str) -> None:
+    """Go's encoding/json trims trailing zeros from the fractional second.
+
+    Matching that here rather than the other way round keeps the domain package
+    free of huma: a custom Go time type would need to supply its own OpenAPI
+    schema, because reflection renders a wrapped time.Time as an object.
+    """
+    from datetime import UTC, datetime
+
+    from widget_svc.domain.timestamps import rfc3339
+
+    assert rfc3339(datetime(2026, 1, 1, tzinfo=UTC).replace(microsecond=microsecond)) == expected

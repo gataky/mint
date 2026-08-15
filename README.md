@@ -10,9 +10,8 @@ templates for minting new services. **That step has not been taken yet** — see
 
 ```
 mint/
-├── go-service/       Go 1.26 · net/http · huma · koanf · slog + tint
-├── python-service/   Python 3.14 · FastAPI · uvicorn · pydantic-settings · loguru
-└── scripts/compare.sh
+├── go-service/       Go 1.26 · net/http · huma · koanf · slog + tint · OTel
+└── python-service/   Python 3.14 · FastAPI · uvicorn · pydantic-settings · loguru · OTel
 ```
 
 ## Quick start
@@ -73,16 +72,40 @@ Only the things something outside the service consumes:
 
 ## What deliberately does not match
 
-Internal layout, error message wording, JSON key order, test names, and module
-structure. Each language does what is idiomatic for it:
+Packaging, error message wording, JSON key order, and test names. Each language
+does what is idiomatic for it:
 
-- Go gets `cmd/` and `internal/` with a `transport/service` split, because that
-  is Go's convention.
-- Python gets a flat `src/widget_svc/` package with an `api/` subpackage,
-  because that is Python's.
+- Go gets `cmd/` and `internal/`, because that is Go's convention.
+- Python gets a `src/widget_svc/` package, because that is Python's.
 
 Writing Python that looks like Go produces bad Python. The contract is the API,
 not the file tree.
+
+## Service structure
+
+The *layers* do match, because they are the thing a template is for. Both
+services are organised the same way, **one file per resource in every layer**,
+so a second and third resource have an obvious home:
+
+```
+domain/       entities and the error taxonomy — imports nothing else
+service/      business rules; declares the repository interfaces it needs
+repository/   implementations of those interfaces (in-memory today)
+transport/    handlers, middleware, error mapping
+```
+
+Dependencies point inward. The repository interface is declared in the *service*
+package that consumes it, not in the repository package — so a Postgres
+implementation lands as a sibling of `memory` without touching the service.
+
+Two example resources ship: `widgets`, and `orders`, which references widgets.
+The second one is there on purpose — with one example you cannot tell what is
+the pattern and what is the resource. `orders` also shows how a resource depends
+on another one: a narrow interface naming just the methods it needs, rather than
+a dependency on the whole neighbouring service.
+
+Persistence is in-memory. The same implementation is used at runtime and in
+tests, so the thing the tests exercise is the thing that runs.
 
 ## Configuration
 

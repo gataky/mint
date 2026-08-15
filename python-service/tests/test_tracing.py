@@ -16,7 +16,7 @@ from starlette.testclient import TestClient
 from widget_svc.api import create_api
 from widget_svc.config import Config
 from widget_svc.log import KEY_SPAN_ID, KEY_TRACE_ID, logger
-from widget_svc.service import Widgets
+from widget_svc.service import Orders, Widgets
 
 
 @pytest.fixture
@@ -35,8 +35,8 @@ def spans() -> Iterator[InMemorySpanExporter]:
 
 
 @pytest.fixture
-def traced(spans: InMemorySpanExporter, widgets: Widgets) -> Iterator[TestClient]:
-    with TestClient(create_api(Config(), widgets)) as client:
+def traced(spans: InMemorySpanExporter, widgets: Widgets, orders: Orders) -> Iterator[TestClient]:
+    with TestClient(create_api(Config(), widgets, orders)) as client:
         yield client
 
 
@@ -115,7 +115,7 @@ def test_service_layer_logs_share_the_request_trace(
     assert len({line[KEY_TRACE_ID] for line in traced_lines}) == 1
 
 
-def test_tracing_can_be_disabled(widgets: Widgets, logs: io.StringIO) -> None:
+def test_tracing_can_be_disabled(logs: io.StringIO) -> None:
     from widget_svc.observability import configure_tracing
 
     config = Config()
@@ -127,7 +127,7 @@ def test_tracing_can_be_disabled(widgets: Widgets, logs: io.StringIO) -> None:
     tracing.shutdown()  # must be safe with no provider
 
 
-def test_no_collector_means_no_export_but_still_spans(widgets: Widgets) -> None:
+def test_no_collector_means_no_export_but_still_spans() -> None:
     from widget_svc.observability import configure_tracing
 
     # A fresh `make run` must not emit a single connection-refused retry, but
