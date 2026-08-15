@@ -39,7 +39,9 @@ for **tier 1 only**. Tier 2 continues to use `slog.NewJSONHandler` behind the
 `mintHandler` wrapper and needs no dependency beyond
 `go.opentelemetry.io/otel/trace`.
 
-Add the row to ADR 0011's pin table.
+ADR 0011 is not edited — this ADR *is* the missing row. The authoritative
+pin list is 0011's table plus this one, which is what "supersede rather than
+edit" costs and why the index in `README.md` records the amendment.
 
 ## Alternatives considered
 
