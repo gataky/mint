@@ -75,18 +75,18 @@ huma.Register(api, huma.Operation{
   or huma writes a bare 500 with no RFC 9457 fields.
 - **Don't let a driver error or stack trace reach the response.** Internal
   errors are logged in full and returned as a generic message.
-- **Don't drop `ctx` from a service method signature.** Nothing uses it for
-  cancellation-heavy work yet; it is there so tracing is an addition rather than
-  a refactor of every call site.
-- **Don't log with a package-level logger.** Use `logging.FromContext(ctx)` so
-  `request_id` — and later `trace_id` — appear automatically.
+- **Don't drop `ctx` from a service method signature.** It carries the trace
+  context; a method that takes no ctx cannot record a span under the request.
+- **Don't log with a package-level logger.** Use `logging.FromContext(ctx)` and
+  the `*Context` variants of slog's methods, so `request_id`, `trace_id` and
+  `span_id` appear automatically.
 - **Don't reorder the middleware chain.** The order in `main.go` is deliberate
   and documented in `middleware.go`; auth in particular sits *inside* logging.
-- **Don't label a metric or log field with a concrete path.** Use the route
-  template, which the huma middleware reports outward.
+- **Don't label a metric, span or log field with a concrete path.** Use the
+  route template from `MuxResolver`; an unrouted request is `<unmatched>` so a
+  flood of random URLs cannot create unbounded series.
 - **Don't re-enable huma's schema-link transformer.** It injects `$schema` into
   every response body, which the Python service does not emit.
-
 - **Don't build a tracer provider outside `internal/observability`.** It is
   installed globally once, at startup, by the composition root.
 - **Don't skip `tracing.Shutdown` on exit.** The spans for the last requests

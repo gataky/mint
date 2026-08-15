@@ -83,12 +83,12 @@ async def delete_widget(
 - **Don't reorder the middleware chain** in `api/__init__.py`. The order is
   deliberate and documented in `api/middleware.py`; auth in particular sits
   *inside* the access log.
-- **Don't label a metric or log field with a concrete path.** Use
-  `request.scope["route"].path`, the route template.
+- **Don't label a metric, span or log field with a concrete path.** Use
+  `resolve_route(scope)`, the route template; an unrouted request is
+  `<unmatched>` so a flood of random URLs cannot create unbounded series.
 - **Don't register a literal subpath after a parameterised one.** Starlette
   matches in registration order, unlike Go's ServeMux, so `/widgets/search`
   must come before `/widgets/{id}` or it is swallowed.
-
 - **Don't build a tracer provider outside `observability.py`.** It is installed
   globally once, at startup, by the composition root.
 - **Don't skip `tracing.shutdown()` on exit.** The spans for the last requests
