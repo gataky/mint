@@ -1,86 +1,75 @@
-# The shared question set — asked identically for every language.
+# The language-agnostic question set, !include-ed by copier.yml.
 #
-# !include-ed as its own YAML document by copier.yml. It must be its own
-# document: used as a mapping entry it fails with InvalidConfigFileError
-# ("could not find expected ':'"). See ADR 0009, Finding 5.
+# !include must be its own YAML document in copier.yml. Used as a mapping entry
+# it fails with InvalidConfigFileError.
 #
-# NEW QUESTIONS GO HERE, not in copier.yml's third document. That document is
-# only for questions gated on `language`, and `make parity` asserts that only
-# module_path and package_name carry a `when:`.
+# Every question carries a help string, a default where one is derivable, and a
+# validator wherever a bad answer would produce code that does not compile or a
+# service that does not boot.
 
 service_name:
   type: str
-  help: |
-    Service name, kebab-case. This becomes the directory name, the binary
-    name, the Prometheus metric namespace, and — in Phase 3 — the Kubernetes
-    object name, so it must be a valid DNS label.
-  default: my-service
+  help: Service name, kebab-case — the binary, the OpenAPI title, the log `service` field
   validator: >-
-    {% if not (service_name | regex_search('^[a-z][a-z0-9-]{1,38}[a-z0-9]$')) %}
-    service_name must be kebab-case and DNS-label-safe: lowercase letters,
-    digits and hyphens, starting with a letter, ending alphanumeric, 3-40
-    characters. Got: {@ service_name @}
+    {% if not service_name | regex_search('^[a-z][a-z0-9-]{1,38}[a-z0-9]$') %}
+    Must be a DNS label: lower-case letters, digits and hyphens, starting with a
+    letter, ending with a letter or digit, 3-40 characters.
     {% endif %}
 
 service_description:
   type: str
-  help: |
-    One line. Lands in the README and in the OpenAPI info.description, so
-    write it for someone who has never heard of this service.
-  default: A Mint-generated service.
-  validator: >-
-    {% if not service_description.strip() %}
-    service_description must not be empty — it is the OpenAPI description.
-    {% endif %}
+  help: One line. Appears in the README and in OpenAPI's info.description
+  default: "A service minted from Mint."
 
 service_owner:
   type: str
-  help: |
-    The team that owns this service. Feeds AGENTS.md, the Prometheus
-    target_info series, and Phase 2/3's CODEOWNERS and k8s annotations.
-  validator: >-
-    {% if not service_owner.strip() %}
-    service_owner must not be empty — an unowned service is an incident
-    waiting for a maintainer.
-    {% endif %}
+  help: Owning team — appears in AGENTS.md and on the target_info metric
+  default: unowned
 
 repo_url:
   type: str
-  help: "Where this service's repo will live, e.g. github.com/acme/widget-svc"
-  default: "github.com/acme/{@ service_name @}"
+  help: Where this service will live, without a scheme (e.g. github.com/acme/my-svc)
+  default: "github.com/example/{@ service_name @}"
+
+include_examples:
+  type: bool
+  help: >-
+    Ship the widgets and orders example resources? They demonstrate the layer
+    pattern and how one resource depends on another. Answer no for an empty
+    service with the same skeleton.
+  default: true
+
+env_prefix:
+  type: str
+  help: >-
+    Prefix for configuration environment variables, without the trailing
+    underscore (MINT gives MINT_SERVER__PORT)
+  default: MINT
   validator: >-
-    {% if not (repo_url | regex_search('^[a-z0-9.-]+\.[a-z]{2,}/[A-Za-z0-9._~/-]+$')) %}
-    repo_url must be a host and path, without a scheme,
-    e.g. github.com/acme/widget-svc. Got: {@ repo_url @}
+    {% if not env_prefix | regex_search('^[A-Z][A-Z0-9]*$') %}
+    Must be upper-case letters and digits, starting with a letter, and must not
+    contain an underscore — `__` separates config levels, so an underscore in
+    the prefix makes the variable names ambiguous.
+    {% elif env_prefix == service_name | upper | replace('-', '_') %}
+    A prefix derived from the service name collides with Kubernetes: it injects
+    {SVCNAME}_PORT into every pod, so {@ service_name | upper | replace('-', '_') @}_PORT
+    would arrive as tcp://10.0.162.149:8080. Use a constant prefix instead.
     {% endif %}
 
 port:
   type: int
-  help: "Port for the HTTP API."
+  help: Port the API listens on
   default: 8080
   validator: >-
     {% if port < 1024 or port > 65535 %}
-    port must be between 1024 and 65535 (ports below 1024 need root).
-    Got: {@ port @}
+    Must be between 1024 and 65535. Ports below 1024 need root.
     {% endif %}
 
 admin_port:
   type: int
-  help: |
-    Port for /metrics, /healthz and /readyz. Defaults to port + 1000.
-
-    Set it EQUAL TO port to serve everything on one listener — that is a
-    supported configuration, not an error.
-
-    This is a routing and lifecycle boundary, NOT a security boundary: any
-    pod that can reach the pod IP can reach every container port on it.
-    Keeping /metrics private is NetworkPolicy's job. What the split actually
-    buys is that readiness and metrics stay answerable while the API
-    listener is draining.
-  default: "{@ port + 1000 if port <= 64535 else port @}"
+  help: Port for /healthz, /readyz and /metrics. Set it equal to `port` to use one listener
+  default: "{@ port + 1000 @}"
   validator: >-
     {% if admin_port < 1024 or admin_port > 65535 %}
-    admin_port must be between 1024 and 65535. Got: {@ admin_port @}.
-    Note that port + 1000 exceeds 65535 when port > 64535; set admin_port
-    explicitly, or set it equal to port to use a single listener.
+    Must be between 1024 and 65535. Ports below 1024 need root.
     {% endif %}

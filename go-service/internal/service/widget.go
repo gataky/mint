@@ -1,0 +1,76 @@
+package service
+
+import (
+	"context"
+	"slices"
+	"strings"
+
+	"github.com/jeffmgreg/widget-svc/internal/domain"
+)
+
+// WidgetRepository is the persistence this service needs.
+//
+// **The interface is declared here, not in internal/repository.** The consumer
+// owns the interface in Go: this package says what it needs, and an
+// implementation elsewhere satisfies it without either one importing the other.
+// That is what lets a test substitute a fake, and what will let a Postgres
+// implementation land without touching this file.
+type WidgetRepository interface {
+	List(ctx context.Context) ([]domain.Widget, error)
+	Get(ctx context.Context, id string) (domain.Widget, error)
+	FindByName(ctx context.Context, name string) (domain.Widget, error)
+	Create(ctx context.Context, widget domain.Widget) error
+}
+
+// Widgets is the widget business logic.
+type Widgets struct {
+	repo WidgetRepository
+	ids  IDGenerator
+	now  Clock
+}
+
+// NewWidgets wires the widget service to its dependencies.
+func NewWidgets(repo WidgetRepository, ids IDGenerator, now Clock) *Widgets {
+	return &Widgets{repo: repo, ids: ids, now: now}
+}
+
+// List returns every widget, oldest first.
+func (w *Widgets) List(ctx context.Context) ([]domain.Widget, error) {
+	return w.repo.List(ctx)
+}
+
+// Get returns one widget by ID.
+func (w *Widgets) Get(ctx context.Context, id string) (domain.Widget, error) {
+	return w.repo.Get(ctx, id)
+}
+
+// Create validates and stores a new widget.
+func (w *Widgets) Create(ctx context.Context, in domain.NewWidget) (domain.Widget, error) {
+	// Business rules live here, not in the transport. The transport has already
+	// checked the shape; this checks the meaning.
+	name := strings.TrimSpace(in.Name)
+	if name == "" {
+		return domain.Widget{}, domain.Invalid("name must not be blank")
+	}
+	if !slices.Contains(domain.Colors, in.Color) {
+		return domain.Widget{}, domain.Invalid("color must be one of %s", strings.Join(domain.Colors, ", "))
+	}
+
+	switch _, err := w.repo.FindByName(ctx, name); {
+	case err == nil:
+		return domain.Widget{}, domain.Conflict("a widget named %q already exists", name)
+	case domain.CategoryOf(err) != domain.CategoryNotFound:
+		return domain.Widget{}, err
+	}
+
+	widget := domain.Widget{
+		ID:        w.ids(),
+		Name:      name,
+		Color:     in.Color,
+		CreatedAt: w.now(),
+	}
+	if err := w.repo.Create(ctx, widget); err != nil {
+		return domain.Widget{}, err
+	}
+	return widget, nil
+}

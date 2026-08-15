@@ -1,0 +1,13 @@
+# Copy to config/config.local.yaml for local-only overrides.
+#
+#   cp config/config.local.yaml.example config/config.local.yaml
+#
+# config.local.yaml is gitignored. It overrides config.yaml and is itself
+# overridden by the environment. Only include the keys you want to change.
+
+logging:
+  level: debug
+
+# server:
+#   port: 8081
+#   admin_port: 9081

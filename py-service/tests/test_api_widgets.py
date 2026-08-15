@@ -1,0 +1,213 @@
+"""The HTTP transport: routing, binding, status codes, and the problem+json contract."""
+
+from __future__ import annotations
+
+import io
+import json
+import re
+
+import pytest
+from starlette.testclient import TestClient
+
+from widget_svc.api.middleware import REQUEST_ID_HEADER
+from widget_svc.api.problem import DEFAULT_PROBLEM_TYPE, PROBLEM_CONTENT_TYPE
+from widget_svc.log import (
+    KEY_ENV,
+    KEY_LEVEL,
+    KEY_MESSAGE,
+    KEY_REQUEST_ID,
+    KEY_SERVICE,
+    KEY_SERVICE_VERSION,
+    KEY_TIME,
+)
+
+
+def test_create_and_fetch_widget(client: TestClient) -> None:
+    created = client.post("/widgets", json={"name": "sprocket", "color": "red"})
+    assert created.status_code == 201, created.text
+
+    widget = created.json()
+    assert widget["id"]
+    assert widget["name"] == "sprocket"
+    assert widget["color"] == "red"
+
+    fetched = client.get(f"/widgets/{widget['id']}")
+    assert fetched.status_code == 200
+    assert fetched.json()["id"] == widget["id"]
+
+
+def test_list_widgets_returns_empty_array(client: TestClient) -> None:
+    response = client.get("/widgets")
+
+    assert response.status_code == 200
+    # null would break a client that iterates the result without a None check.
+    assert response.json() == []
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body", "expected_status", "expected_title"),
+    [
+        pytest.param(
+            "GET",
+            "/widgets/no-such-id",
+            None,
+            404,
+            "Not Found",
+            id="unknown widget is not found",
+        ),
+        pytest.param(
+            "GET",
+            "/nothing-here",
+            None,
+            404,
+            "Not Found",
+            id="unroutable path is not found",
+        ),
+        pytest.param(
+            "POST",
+            "/widgets",
+            {"name": "", "color": "puce"},
+            422,
+            "Unprocessable Entity",
+            id="shape violation is unprocessable",
+        ),
+    ],
+)
+def test_error_responses_use_problem_json(
+    client: TestClient,
+    method: str,
+    path: str,
+    body: dict[str, str] | None,
+    expected_status: int,
+    expected_title: str,
+) -> None:
+    response = client.request(method, path, json=body)
+
+    assert response.status_code == expected_status, response.text
+    assert response.headers["content-type"].startswith(PROBLEM_CONTENT_TYPE)
+
+    problem = response.json()
+    # RFC 9457 requires these; both services emit all four.
+    assert problem["type"] == DEFAULT_PROBLEM_TYPE
+    assert problem["title"] == expected_title
+    assert problem["status"] == expected_status
+    assert problem["instance"] == path
+
+
+def test_duplicate_name_is_a_conflict(client: TestClient) -> None:
+    body = {"name": "sprocket", "color": "red"}
+    assert client.post("/widgets", json=body).status_code == 201
+
+    response = client.post("/widgets", json=body)
+
+    assert response.status_code == 409, response.text
+    assert response.json()["title"] == "Conflict"
+
+
+def test_validation_errors_are_reshaped(client: TestClient) -> None:
+    response = client.post("/widgets", json={"name": "", "color": "puce"})
+
+    # FastAPI's own body is {"detail": [...]} with pydantic's key names. The
+    # shared shape is {"message", "location", "value"}.
+    errors = response.json()["errors"]
+    assert len(errors) == 2
+    locations = {error["location"] for error in errors}
+    assert locations == {"body.name", "body.color"}
+    for error in errors:
+        assert set(error) <= {"message", "location", "value"}
+        assert error["message"]
+
+
+def test_request_id_is_generated_when_absent(client: TestClient) -> None:
+    response = client.get("/widgets")
+
+    assert response.headers.get(REQUEST_ID_HEADER)
+
+
+def test_request_id_is_reused_when_supplied(client: TestClient) -> None:
+    # A caller's ID must survive the hop, or a trace across services breaks.
+    response = client.get("/widgets", headers={REQUEST_ID_HEADER: "caller-supplied-id"})
+
+    assert response.headers[REQUEST_ID_HEADER] == "caller-supplied-id"
+
+
+def test_access_log_carries_the_reserved_fields(client: TestClient, logs: io.StringIO) -> None:
+    client.get("/widgets")
+
+    line = _last_log_line(logs)
+    for key in (
+        KEY_TIME,
+        KEY_LEVEL,
+        KEY_MESSAGE,
+        KEY_SERVICE,
+        KEY_SERVICE_VERSION,
+        KEY_ENV,
+        KEY_REQUEST_ID,
+        "method",
+        "route",
+        "path",
+        "status",
+        "duration_ms",
+    ):
+        assert key in line, f"access log line has no {key!r} field: {line}"
+
+
+def test_access_log_records_the_route_template_not_the_path(
+    client: TestClient, logs: io.StringIO
+) -> None:
+    # Logging the concrete path would make every widget ID its own value —
+    # unbounded cardinality once this label reaches metrics.
+    client.get("/widgets/abc123")
+
+    line = _last_log_line(logs)
+    assert line["route"] == "/widgets/{id}"
+    assert line["path"] == "/widgets/abc123"
+
+
+@pytest.mark.parametrize(
+    ("path", "expected_level"),
+    [
+        pytest.param("/widgets", "info", id="success logs at info"),
+        pytest.param("/widgets/missing", "warn", id="client error logs at warn"),
+    ],
+)
+def test_access_log_level_tracks_the_status(
+    client: TestClient, logs: io.StringIO, path: str, expected_level: str
+) -> None:
+    client.get(path)
+
+    assert _last_log_line(logs)[KEY_LEVEL] == expected_level
+
+
+def test_openapi_document_describes_every_operation(client: TestClient) -> None:
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+
+    document = response.json()
+    assert document["openapi"].startswith("3.1")
+    for path, methods in {"/widgets": ["get", "post"], "/widgets/{id}": ["get"]}.items():
+        for method in methods:
+            assert method in document["paths"][path], f"missing {method.upper()} {path}"
+
+
+def test_docs_are_served(client: TestClient) -> None:
+    response = client.get("/docs")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+
+
+def test_created_at_is_rfc3339(client: TestClient) -> None:
+    # Pydantic would emit microseconds and a "+00:00" offset by default.
+    created = client.post("/widgets", json={"name": "sprocket", "color": "red"}).json()
+
+    assert re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z", created["created_at"]
+    ), created["created_at"]
+
+
+def _last_log_line(logs: io.StringIO) -> dict[str, object]:
+    lines = [line for line in logs.getvalue().splitlines() if line.strip()]
+    assert lines, "no log lines were written"
+    parsed: dict[str, object] = json.loads(lines[-1])
+    return parsed

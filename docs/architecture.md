@@ -1,1 +1,0 @@
-../templates/_common/docs/architecture.md

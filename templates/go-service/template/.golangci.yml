@@ -1,38 +1,42 @@
-# golangci-lint configuration. The version is pinned by a `tool` directive in
-# go.mod, so `go tool golangci-lint` needs no separate install and cannot
-# drift from what CI runs.
-#
-# `version: "2"` is required, not decorative: golangci-lint 2.x treats a
-# v1-shaped config as a hard error rather than a warning, and the message it
-# prints does not name this line. Check this file with
-# `go tool golangci-lint config verify`.
+# Linters are listed explicitly rather than inherited from the defaults, so a
+# golangci-lint upgrade cannot silently change what `make lint` means.
 version: "2"
 
+run:
+  timeout: 3m
+
 linters:
-  # "standard" is errcheck, govet, ineffassign, staticcheck and unused. The
-  # additions below each earn their place; a lint that fires on style opinions
-  # nobody agreed to is a lint people learn to ignore.
-  default: standard
+  default: none
   enable:
-    - bodyclose # an unclosed response body leaks a connection, silently
-    - errorlint # %v on an error breaks errors.Is/As for every caller
+    - errcheck # unchecked errors
+    - govet # suspicious constructs
+    - ineffassign # assignments never used
+    - staticcheck # correctness, simplification, style
+    - unused # unused code
+    - bodyclose # unclosed HTTP response bodies
+    - errorlint # error wrapping mistakes
+    - noctx # HTTP requests sent without a context
+    - revive # general style
     - misspell
-    - revive
 
   settings:
     revive:
       rules:
-        # Every directory in this service carries a package comment saying
-        # what belongs in it. That is the rule this repo is built on, so it
-        # is checked rather than remembered.
-        - name: package-comments
         - name: exported
-          arguments:
-            - disableStutteringCheck
+          disabled: true # doc comments are reviewed, not linted
 
+  exclusions:
+    rules:
+      # Tests may ignore errors that production code must not.
+      - path: _test\.go
+        linters:
+          - errcheck
+{% if not include_examples %}      # This service has no resources yet, so the scaffolding the first one will
+      # call has no caller. Delete this rule once it does.
+      - path: (internal/transport/http/errors\.go|internal/repository/memory/memory\.go)
+        linters:
+          - unused
+{% endif %}
 formatters:
-  # Deliberately empty. Formatting is `make fmt`, which runs the gofumpt
-  # pinned in go.mod. Enabling a formatter here would run golangci-lint's
-  # bundled copy instead, and two gofumpt versions disagreeing is a `make
-  # lint` failure that `make fmt` cannot fix.
-  enable: []
+  enable:
+    - gofumpt

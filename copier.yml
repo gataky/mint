@@ -1,89 +1,77 @@
-# Mint — the single template definition.
+# The single template definition for Mint.
 #
-# THIS FILE MUST LIVE AT THE GIT REPO ROOT. Copier only treats a path as
-# VCS-tracked when it *is* the repo root, so a per-template copier.yml under
-# templates/go-service/ produces a service with no _commit at all, no mint
-# mark, and a `copier update` that exits 1 forever. See ADR 0009, Finding 4.
+# It lives at the repo root, and there is exactly one of it. This is not a style
+# preference: Copier treats a path as VCS-tracked only when it *is* the git repo
+# root, so a copier.yml under templates/go-service/ yields "Copying from
+# template version None", records no _commit, and makes `copier update` exit 1
+# with "cannot obtain old template references".
 #
-# There is exactly ONE question set. The two language trees cannot drift
-# apart because there is nothing to drift from.
-
-# --- Document 1: template mechanics + the one question that selects a tree ---
+#   copier copy . ~/src/my-svc          # mint a new service
+#   copier update                        # from inside a generated service
+#
+# The variable delimiter is {@ @}, not {{ }}. Helm and GitHub Actions' ${{ }}
+# both use {{ }} heavily in files this repo will eventually generate. Blocks
+# and comments stay on Jinja's defaults, {% %} and {# #}, which collide with
+# nothing in this stack.
 ---
 _subdirectory: "templates/{@ language @}-service/template"
 _min_copier_version: "9.17.1"
+_answers_file: ".copier-answers.yml"
 
-# ONLY the variable delimiter differs from Jinja's defaults, and it took two
-# tries to get right.
-#
-# `{{ }}` is unusable: Helm (Phase 3) and GitHub Actions' `${{ }}` (Phase 2)
-# both use it heavily, in files we know we are going to write.
-#
-# `[[ ]]` was the first replacement and was worse. It collides with things
-# that exist RIGHT NOW: Python's `Callable[[str], str]` — which is simply how
-# you annotate a callback and cannot be avoided — plus TOML's `[[table]]` and
-# bash's `[[ test ]]`. It was chosen to dodge two hypothetical future
-# collisions and bought three present ones.
-#
-# `{@ @}` appears in none of Go, Python, YAML, TOML, Make, bash, Helm or
-# GitHub Actions. Blocks and comments stay on Jinja's defaults because `{%`
-# and `{#` collide with nothing in this stack — only `{{` was ever contested.
 _envops:
   variable_start_string: "{@"
   variable_end_string: "@}"
-  block_start_string: "{%"
-  block_end_string: "%}"
-  comment_start_string: "{#"
-  comment_end_string: "#}"
+
+# Every file in the template is rendered, so source files keep their real
+# extensions: main.go is main.go, not main.go.jinja. The cost is that a literal
+# {% or {# in template source would need escaping — no Go, Make or YAML
+# construct uses either.
+_templates_suffix: ""
 
 _tasks:
-  - command: "git init -q -b main ."
-    when: "{@ not _copier_conf.vcs_ref @}"
+  # Generating into an existing checkout is normal, so this initialises a repo
+  # only when there is not one already.
+  - "git rev-parse --git-dir >/dev/null 2>&1 || git init --quiet --initial-branch=main"
   - command: "go mod tidy"
     when: "{@ language == 'go' @}"
-  - command: "uv sync --quiet"
-    when: "{@ language == 'python' @}"
-  - command: |
-      printf '\n  Minted %s.\n\n  Next:\n    direnv allow\n    make run\n\n  Then: make help\n\n' '{@ service_name @}'
+  # `uv lock`, not just `uv sync`: uv.lock names the project, and the project
+  # was just renamed by this generation, so the shipped lock is stale on the
+  # first line.
+  - command: "uv lock --quiet && uv sync --quiet"
+    when: "{@ language == 'py' @}"
+  - |
+    printf '\n\033[1m%s\033[0m is ready.\n\n' '{@ service_name @}'
+    printf '  cd %s\n' '{@ _copier_conf.dst_path @}'
+    printf '  direnv allow      # picks up the pinned {@ "Go" if language == "go" else "Python" @} from .tool-versions\n'
+    printf '  make test\n'
+    printf '  make run          # :{@ port @}, admin :{@ admin_port @}\n\n'
 
 language:
   type: str
-  help: |
-    Which language? This selects the template tree and is recorded in
-    .copier-answers.yml. No generated file may branch on it beyond this.
+  help: Which language should this service be written in?
   choices:
     Go: go
-    Python: python
+    Python: py
   default: go
 
-# --- Document 2: the shared question set, identical for both languages ---
 ---
 !include "questions-shared.yml"
 
-# --- Document 3: the only language-conditional questions -------------------
-#
-# These two are gated on `language` and NOTHING ELSE. A new question belongs
-# in questions-shared.yml above; putting it here reintroduces exactly the
-# drift the single-file layout removed, and `make parity` asserts that only
-# these two carry a `when:`.
 ---
 module_path:
   type: str
-  when: "{@ language == 'go' @}"
-  help: "Go module path. Must match the import path consumers will use."
+  help: Go module path — what `go get` would be given
   default: "{@ repo_url @}"
+  when: "{@ language == 'go' @}"
   validator: >-
-    {% if not (module_path | regex_search('^[a-z0-9][a-z0-9._~-]*(\.[a-z]{2,})?(/[a-zA-Z0-9._~-]+)+$')) %}
-    module_path must look like a Go module path, e.g. github.com/acme/widget-svc
-    {% endif %}
+    {% if not module_path %}A module path is required.{% endif %}
 
 package_name:
   type: str
-  when: "{@ language == 'python' @}"
-  help: "Python package name. Importable, so underscores rather than hyphens."
+  help: Python package name — the importable name under src/
   default: "{@ service_name | replace('-', '_') @}"
+  when: "{@ language == 'py' @}"
   validator: >-
-    {% if not (package_name | regex_search('^[a-z][a-z0-9_]*$')) %}
-    package_name must be a valid Python identifier: lowercase, digits and
-    underscores, starting with a letter. Got: {@ package_name @}
+    {% if not package_name | regex_search('^[a-z][a-z0-9_]*$') %}
+    Must be a valid Python identifier: lower-case, digits and underscores.
     {% endif %}

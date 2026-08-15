@@ -1,0 +1,105 @@
+"""Order business logic, including the dependency on widgets."""
+
+from __future__ import annotations
+
+import pytest
+
+from conftest import counting_ids, fixed_clock
+from widget_svc.domain import (
+    MAX_ORDER_QUANTITY,
+    Category,
+    InvalidError,
+    NewOrder,
+    NewWidget,
+    NotFoundError,
+    Widget,
+)
+from widget_svc.repository import memory
+from widget_svc.service import Orders, Widgets
+
+
+@pytest.fixture
+async def widget_id(widgets: Widgets) -> str:
+    """An existing widget, since an order cannot be placed without one."""
+    widget = await widgets.create(NewWidget(name="sprocket", color="red"))
+    return widget.id
+
+
+async def test_create_order(orders: Orders, widget_id: str) -> None:
+    created = await orders.create(NewOrder(widget_id=widget_id, quantity=3))
+
+    assert created.widget_id == widget_id
+    assert created.quantity == 3
+    assert created.id
+    assert created.created_at
+
+
+async def test_create_order_for_unknown_widget_is_invalid(orders: Orders) -> None:
+    with pytest.raises(InvalidError) as raised:
+        await orders.create(NewOrder(widget_id="no-such-widget", quantity=1))
+
+    # Invalid, not not-found: the request is well formed and /orders exists —
+    # what is wrong is the reference inside the body.
+    assert raised.value.category is Category.INVALID
+
+
+@pytest.mark.parametrize(
+    "quantity",
+    [
+        pytest.param(0, id="zero"),
+        pytest.param(-1, id="negative"),
+        pytest.param(MAX_ORDER_QUANTITY + 1, id="above the maximum"),
+    ],
+)
+async def test_quantity_is_rejected_before_the_service(quantity: int, widget_id: str) -> None:
+    # The bounds are declared on the model, so an out-of-range quantity never
+    # reaches Orders.create — which is what produces the 422 at the edge.
+    with pytest.raises(ValueError, match="quantity"):
+        NewOrder(widget_id=widget_id, quantity=quantity)
+
+
+async def test_get_order(orders: Orders, widget_id: str) -> None:
+    created = await orders.create(NewOrder(widget_id=widget_id, quantity=2))
+
+    assert await orders.get(created.id) == created
+
+
+async def test_get_order_missing(orders: Orders) -> None:
+    with pytest.raises(NotFoundError) as raised:
+        await orders.get("no-such-id")
+
+    assert raised.value.category is Category.NOT_FOUND
+
+
+async def test_list_orders_is_ordered_oldest_first(orders: Orders, widget_id: str) -> None:
+    for quantity in (1, 2, 3):
+        await orders.create(NewOrder(widget_id=widget_id, quantity=quantity))
+
+    assert [order.quantity for order in await orders.list()] == [1, 2, 3]
+
+
+async def test_list_orders_is_empty_not_none(orders: Orders) -> None:
+    assert await orders.list() == []
+
+
+async def test_orders_depend_only_on_the_narrow_lookup(widgets: Widgets) -> None:
+    """Anything satisfying WidgetLookup is enough to place an order.
+
+    That is the point of the narrow Protocol: orders need one method, not the
+    whole widget service, so a change to widgets is not automatically a change
+    to orders.
+    """
+    seeded = await widgets.create(NewWidget(name="sprocket", color="red"))
+
+    class OnlyGet:
+        """A stand-in exposing exactly what WidgetLookup requires."""
+
+        async def get(self, widget_id: str) -> Widget:
+            if widget_id != seeded.id:
+                raise NotFoundError(f'no widget with id "{widget_id}"')
+            return seeded
+
+    orders = Orders(memory.Orders(), OnlyGet(), counting_ids("order"), fixed_clock())
+
+    created = await orders.create(NewOrder(widget_id=seeded.id, quantity=1))
+    assert created.widget_id == seeded.id

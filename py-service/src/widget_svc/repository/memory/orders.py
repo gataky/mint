@@ -1,0 +1,33 @@
+"""In-memory order store."""
+
+from __future__ import annotations
+
+import asyncio
+
+from widget_svc.domain import NotFoundError, Order
+
+
+class Orders:
+    """An order store backed by a dict."""
+
+    def __init__(self) -> None:
+        self._items: dict[str, Order] = {}
+        self._lock = asyncio.Lock()
+
+    async def list(self) -> list[Order]:
+        """Every order, oldest first."""
+        async with self._lock:
+            return sorted(self._items.values(), key=lambda o: (o.created_at, o.id))
+
+    async def get(self, order_id: str) -> Order:
+        """One order by ID."""
+        async with self._lock:
+            order = self._items.get(order_id)
+        if order is None:
+            raise NotFoundError(f'no order with id "{order_id}"')
+        return order
+
+    async def create(self, order: Order) -> None:
+        """Store an order."""
+        async with self._lock:
+            self._items[order.id] = order
