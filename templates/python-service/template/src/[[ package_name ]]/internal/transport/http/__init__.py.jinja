@@ -1,5 +1,6 @@
-"""The HTTP transport, and the only package in this service that may import
-FastAPI. `make lint` fails the build if any other package does.
+"""The HTTP transport, and the only package here that may import FastAPI.
+
+`make lint` fails the build if any other package does.
 
 It nests one level deeper than it needs to — `internal/transport/http` rather
 than `internal/http` — so that a second transport is a peer directory and not

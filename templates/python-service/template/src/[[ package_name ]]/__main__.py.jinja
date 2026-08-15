@@ -1,5 +1,4 @@
-"""This service's composition root: the one place that knows how the pieces
-fit together.
+"""This service's composition root: the one place that knows how the pieces fit together.
 
 Belongs here: loading configuration, building the logger and the tracer,
 constructing the repository, injecting it into the service layer, injecting
@@ -39,13 +38,27 @@ def main() -> None:
     """Serve the API and block until the server stops."""
     # One plain line, not a log record. Mint chunk 04 owns logging, and a
     # half-configured logger here would be the thing chunk 04 has to undo.
-    print(f"[[ service_name ]] listening on http://{HOST}:{PORT}")  # noqa: T201
+    # flush=True because stdout is block-buffered when it is not a terminal,
+    # and a startup line that appears only after the process dies is worse
+    # than no startup line.
+    print(f"[[ service_name ]] listening on http://{HOST}:{PORT}", flush=True)  # noqa: T201
 
     # log_config=None keeps uvicorn from calling dictConfig() and stealing the
     # root handler; access_log=False retires its unstructured access line.
     # Mint chunk 04 installs the handler this leaves room for, and chunk 06
     # takes over signal handling and the drain.
-    uvicorn.run(app, host=HOST, port=PORT, log_config=None, access_log=False)
+    #
+    # server_header=False because Go's net/http sends no Server header, and
+    # parity is a promise about what goes over the wire, not just about which
+    # files exist.
+    uvicorn.run(
+        app,
+        host=HOST,
+        port=PORT,
+        log_config=None,
+        access_log=False,
+        server_header=False,
+    )
 
 
 if __name__ == "__main__":

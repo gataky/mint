@@ -1,18 +1,9 @@
-// Package http is the HTTP transport, and the only package in this service
-// that may import net/http. `make lint` fails the build if any other package
-// does.
+// Builds and runs the servers this service listens on. The package's own
+// documentation — what belongs in here and what does not — is in doc.go.
 //
-// It nests one level deeper than it needs to — internal/transport/http rather
-// than internal/http — so that a second transport is a peer directory and not
-// a refactor. Do not flatten it. See docs/architecture.md.
-//
-// Belongs here: routing, request decoding, response encoding, the mapping
-// from an error category to an HTTP status, middleware, and the servers'
-// own timeouts.
-//
-// Does NOT belong here: business rules, validation beyond "is this the shape
-// I was promised", or anything that reads a database. Handlers call the
-// service layer with plain Go values and serialize what comes back.
+// Mint chunk 06 adds middleware, health endpoints and the admin listener
+// here; chunk 07 registers the real routes from the operation registry, so
+// handlers are not written one by one below.
 package http
 
 import (

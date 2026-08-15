@@ -1,0 +1,10 @@
+// Package internal is the private implementation of this service. Nothing
+// outside this module can import anything under it — the Go compiler enforces
+// that, which is the whole reason the directory has this name.
+//
+// It holds no code of its own. Every child package below states what belongs
+// in it; read that before adding a file.
+//
+// The Python template mirrors this tree directory for directory, so a change
+// to the shape here is a change to both languages.
+package internal

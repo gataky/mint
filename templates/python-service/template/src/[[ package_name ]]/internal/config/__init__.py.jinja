@@ -1,5 +1,7 @@
-"""Loads and validates this service's configuration, and is the ONLY package
-in this service that may read an environment variable.
+"""Loads configuration, and is the ONLY package here that may read an env var.
+
+It loads and validates this service's configuration at startup, and nothing
+else in this service reads an environment variable.
 
 That rule is what makes `make config` able to print the effective
 configuration truthfully. One `os.environ` lookup somewhere else and the
