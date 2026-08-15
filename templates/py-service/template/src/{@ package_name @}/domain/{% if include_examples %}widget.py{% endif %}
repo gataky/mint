@@ -1,0 +1,38 @@
+"""The widget entity."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Literal
+
+from pydantic import BaseModel, Field, field_serializer
+
+from {@ package_name @}.domain.timestamps import rfc3339
+
+#: Colours a widget may be. A Literal rather than a list, so the OpenAPI enum,
+#: the request validation and the type checker all read the same declaration.
+Color = Literal["red", "green", "blue"]
+
+
+class Widget(BaseModel):
+    """A thing this service manages."""
+
+    id: str = Field(description="Unique widget identifier.")
+    name: str = Field(description="Human-readable widget name.")
+    color: Color = Field(description="Widget color.")
+    created_at: datetime = Field(description="When the widget was created, RFC 3339.")
+
+    @field_serializer("created_at")
+    def _serialize_created_at(self, value: datetime) -> str:
+        return rfc3339(value)
+
+
+class NewWidget(BaseModel):
+    """The input to creating a widget.
+
+    A separate model from :class:`Widget` because the server, not the client,
+    owns ``id`` and ``created_at``.
+    """
+
+    name: str = Field(min_length=1, max_length=64, description="Human-readable widget name.")
+    color: Color = Field(description="Widget color.")

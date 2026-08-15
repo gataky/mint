@@ -32,20 +32,26 @@ _tasks:
   # Generating into an existing checkout is normal, so this initialises a repo
   # only when there is not one already.
   - "git rev-parse --git-dir >/dev/null 2>&1 || git init --quiet --initial-branch=main"
-  - "go mod tidy"
+  - command: "go mod tidy"
+    when: "{@ language == 'go' @}"
+  # `uv lock`, not just `uv sync`: uv.lock names the project, and the project
+  # was just renamed by this generation, so the shipped lock is stale on the
+  # first line.
+  - command: "uv lock --quiet && uv sync --quiet"
+    when: "{@ language == 'py' @}"
   - |
     printf '\n\033[1m%s\033[0m is ready.\n\n' '{@ service_name @}'
     printf '  cd %s\n' '{@ _copier_conf.dst_path @}'
-    printf '  direnv allow      # picks up the pinned Go from .tool-versions\n'
+    printf '  direnv allow      # picks up the pinned {@ "Go" if language == "go" else "Python" @} from .tool-versions\n'
     printf '  make test\n'
     printf '  make run          # :{@ port @}, admin :{@ admin_port @}\n\n'
 
 language:
   type: str
   help: Which language should this service be written in?
-  # Python lands next; the answer value is `py`, matching templates/py-service.
   choices:
     Go: go
+    Python: py
   default: go
 
 ---

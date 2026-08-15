@@ -1,0 +1,92 @@
+[project]
+name = "{@ service_name @}"
+version = "0.1.0"
+description = "{@ service_description @}"
+requires-python = ">=3.14"
+
+dependencies = [
+    "fastapi>=0.121",
+    "uvicorn>=0.38",
+    "pydantic>=2.12",
+    "pydantic-settings>=2.12",
+    "pyyaml>=6.0",
+    "loguru>=0.7.3",
+    "prometheus-client>=0.26.0",
+    "opentelemetry-sdk>=1.44.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.44.0",
+    "opentelemetry-instrumentation-fastapi>=0.65b0",
+]
+
+[dependency-groups]
+# Tooling is pinned here and run through `uv run`, so there is nothing to
+# install globally and every developer gets the same versions.
+dev = [
+    "pytest>=8.4",
+    "pytest-asyncio>=1.2",
+    "pytest-cov>=7.0",
+    # Starlette 1.6 deprecates httpx in its test client in favour of httpx2.
+    "httpx2>=2.10",
+    "ruff>=0.14",
+    "mypy>=1.18",
+    "types-pyyaml>=6.0.12.20260815",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/{@ package_name @}"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+# Integration tests are marked and excluded from `make test`.
+addopts = "-m 'not integration'"
+markers = [
+    "integration: a test that needs something outside this process",
+]
+
+[tool.coverage.run]
+source = ["src/{@ package_name @}"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+# Rules are listed explicitly rather than inherited. Ruff changed its defaults
+# from 59 rules to 413 in 0.16.0; inheriting them means an upgrade silently
+# changes what `make lint` means.
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # import sorting
+    "N",    # pep8 naming
+    "UP",   # pyupgrade
+    "B",    # bugbear
+    "C4",   # comprehensions
+    "SIM",  # simplify
+    "RUF",  # ruff-specific
+    "ASYNC",# async correctness
+    "PT",   # pytest style
+    "RET",  # return simplification
+    "ARG",  # unused arguments
+    "PTH",  # use pathlib
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests may shadow names and use assert freely.
+"tests/*" = ["ARG001"]
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+files = ["src", "tests"]
+# Go type-checks as part of compilation and Python does not, so mypy is part of
+# `make lint` — otherwise the two lint targets would not mean the same thing.
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false

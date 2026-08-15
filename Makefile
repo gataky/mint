@@ -44,8 +44,10 @@ mint: ## Mint a new service from the template (DEST=../my-svc)
 	@test -n "$(DEST)" || { echo "usage: make mint DEST=../my-svc"; exit 1; }
 	@$(COPIER) copy --trust . "$(DEST)"
 
-verify: ## Generate from the template, then build, test, lint and boot it
-	@./scripts/verify-template.sh
+# ONLY, not LANG or LANGUAGE: both of those are locale variables make imports
+# from the environment, so the target would silently verify "en_US.UTF-8".
+verify: ## Generate from the templates, then build, test, lint and boot them (ONLY=go|py)
+	@./scripts/verify-template.sh $(ONLY)
 
 run-go: ## Boot the Go service
 	@$(MAKE) --no-print-directory -C go-service run

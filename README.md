@@ -5,8 +5,7 @@ and the **same Makefile**. A client cannot tell which one it is talking to; a
 developer moving between them does not have to relearn anything.
 
 Each one is also the source of a [Copier](https://copier.readthedocs.io/)
-template for minting new services. **Go is templated; Python is next** — see
-[Where this is going](#where-this-is-going).
+template for minting new services, in either language.
 
 ```
 mint/
@@ -14,7 +13,8 @@ mint/
 ├── py-service/       Python 3.14 · FastAPI · uvicorn · pydantic-settings · loguru · OTel
 ├── copier.yml        the template definition — one, at the repo root
 └── templates/
-    └── go-service/template/   the parameterized copy of go-service/
+    ├── go-service/template/   the parameterized copy of go-service/
+    └── py-service/template/   the parameterized copy of py-service/
 ```
 
 The two services stay runnable: they are the reference, and the templates are
@@ -26,19 +26,22 @@ generated copies of them, not a replacement.
 make mint DEST=../parts-svc
 ```
 
-Copier asks for the service name, description, owner, repo URL, module path,
+Copier asks for the language, service name, description, owner, repo URL,
 environment-variable prefix, ports, and whether to include the two example
-resources. It then runs `git init` and `go mod tidy` and prints what to do
-next. Answers land in `.copier-answers.yml`, and `copier update` inside the
-generated service pulls in later template changes as a three-way merge.
+resources — plus the Go module path or the Python package name, whichever
+applies. It then runs `git init`, resolves dependencies (`go mod tidy` or
+`uv lock && uv sync`), and prints what to do next. Answers land in
+`.copier-answers.yml`, and `copier update` inside the generated service pulls in
+later template changes as a three-way merge.
 
 ```sh
-make verify   # generate, build, test, lint and boot a service — twice
+make verify   # generate, build, test, lint and boot a service — four times
 ```
 
-`make verify` generates with the defaults and again with no examples, a custom
-env prefix and custom ports, because the interesting failures live at the
-answers that are not the defaults.
+`make verify` generates each language with the defaults and again with no
+examples, a custom env prefix and custom ports, because the interesting failures
+live at the answers that are not the defaults. `make verify ONLY=py` runs one
+language.
 
 ## Quick start
 
@@ -177,18 +180,15 @@ Add direnv's hook to your shell, then `direnv allow` in each service directory.
 **Built:** config, two log tiers, the error contract, the HTTP transport, health
 endpoints, Prometheus metrics, OpenTelemetry tracing, graceful shutdown,
 OpenAPI 3.1 with Swagger UI, tests, Makefiles, asdf and direnv — and the Copier
-template for the Go service, verified end to end by `make verify`.
+templates for both services, verified end to end by `make verify`.
 
 **Next, in rough order:**
 
-1. **The Python template** — `templates/py-service/template/`, the second
-   `language` choice, and `package_name`. Until it lands, `language` offers Go
-   only.
-2. **Versioning and updates** — repo-wide semver tags, a mint mark in the
+1. **Versioning and updates** — repo-wide semver tags, a mint mark in the
    generated README that names the version it came from, and a documented
    `copier update` run. The template already writes `.copier-answers.yml`;
    without tags, generated services track HEAD.
-3. **A conformance test** — `scripts/compare.sh` is a script you read the output
+2. **A conformance test** — `scripts/compare.sh` is a script you read the output
    of, not a test suite. Promoting it to something that runs in CI is a
    deliberate later step.
 
