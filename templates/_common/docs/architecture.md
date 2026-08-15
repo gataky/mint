@@ -10,9 +10,12 @@
 > `copier update` once that chunk has shipped. An empty section below is not a
 > missing file — it is work Mint has not done yet.
 >
-> Edit this file only to record a decision *this service* has made that
-> departs from the template. Everything else belongs upstream in Mint, or the
-> next `copier update` will conflict with it.
+> **Where to edit it.** This file is authored in Mint, at
+> `templates/_common/docs/architecture.md`; Mint's own `docs/architecture.md`
+> is a symlink to it, so there is exactly one copy of these facts. In a
+> generated service, edit it only to record a decision *that service* has made
+> which departs from the template — everything else belongs upstream, or the
+> next `copier update` conflicts with it.
 
 ## The three layers
 

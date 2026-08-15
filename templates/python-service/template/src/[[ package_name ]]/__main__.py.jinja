@@ -45,8 +45,13 @@ def main() -> None:
 
     # log_config=None keeps uvicorn from calling dictConfig() and stealing the
     # root handler; access_log=False retires its unstructured access line.
-    # Mint chunk 04 installs the handler this leaves room for, and chunk 06
-    # takes over signal handling and the drain.
+    # Mint chunk 04 installs the handler this leaves room for.
+    #
+    # Chunk 06 replaces uvicorn.run() with an explicit Config/Server pair per
+    # listener and its own signal handling. BOTH kwargs must survive that
+    # move into uvicorn.Config — losing either silently restores uvicorn's
+    # handlers, and the symptom (correct logs in tests, two formats in
+    # production) shows up nowhere near the change that caused it.
     #
     # server_header=False because Go's net/http sends no Server header, and
     # parity is a promise about what goes over the wire, not just about which

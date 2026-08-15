@@ -160,6 +160,16 @@ produce code that doesn't compile, and a default where derivable.
 **Jinja delimiters are `[[ ]]` / `[% %]` / `[# #]`.** Phase 2 brings GitHub
 Actions and its `${{ }}` would collide.
 
+**`[[ ]]` has one live collision of its own: TOML's array-of-tables syntax
+is also `[[name]]`.** In a verbatim file this is harmless — `uv.lock` ships
+31 `[[package]]` lines and Copier never renders it. In a `.jinja` file it is
+silent data loss: Jinja parses `[[tool.mypy.overrides]]` as an undefined
+variable, renders an empty string, and leaves behind TOML that is still
+syntactically valid with the section simply gone. Nothing fails.
+
+The distinguishing feature is the space — Mint always writes `[[ name ]]`,
+TOML never does — and `make parity` asserts on it in both directions.
+
 **`_tasks`**: `git init`, then `go mod tidy` / `uv sync`, then a printed
 next-steps block ending with `direnv allow` and `make run`.
 

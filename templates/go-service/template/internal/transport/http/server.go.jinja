@@ -1,10 +1,12 @@
-// Builds and runs the servers this service listens on. The package's own
-// documentation — what belongs in here and what does not — is in doc.go.
+package http
+
+// This file builds and runs the servers this service listens on. The
+// package's own documentation — what belongs in here and what does not — is
+// in doc.go.
 //
 // Mint chunk 06 adds middleware, health endpoints and the admin listener
 // here; chunk 07 registers the real routes from the operation registry, so
 // handlers are not written one by one below.
-package http
 
 import (
 	"net/http"
