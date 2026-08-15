@@ -1,0 +1,25 @@
+# Local agent settings — machine-specific, never committed
+.claude/settings.local.json
+
+# Verify/parity harness scratch — generated services land here transiently
+/.mint-tmp/
+/tmp/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Go
+/bin/
+*.test
+coverage.out
+
+# Editors / OS
+.DS_Store
+*.swp
+.idea/
+.vscode/
