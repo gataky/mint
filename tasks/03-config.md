@@ -227,8 +227,9 @@ provider; just leave the documented seam.
   Bare `ENV=bogus` is ignored entirely.
 - A field marked secret appears masked in `make config` output and never
   appears unmasked in any output the service produces.
-- `make config` output for the two generated services is diff-identical
-  modulo the service name.
+- `make config` **succeeds** in both. Its output is no longer diffed between
+  languages (ADR 0017) — the rendering is formatting, and formatting is
+  idiomatic. The *source order* it reports is still a contract and is checked.
 - `make lint` fails when an env var read is added outside `internal/config`.
   Demonstrate, then revert.
 - `scripts/parity.sh` gains a check diffing `make config` output between the

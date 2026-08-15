@@ -96,7 +96,8 @@ example resource (chunk 07).
 - Every category maps to exactly one HTTP status, identically in both
   languages.
 - Serializing the same domain error in Go and in Python produces
-  byte-identical JSON except for `instance` and `trace_id`.
+  the same JSON FIELD SET, with the same category→status mapping. Byte
+  equality is not required (ADR 0017); a client parses the body.
 - An error wrapping a simulated driver failure renders a generic client
   message; the driver detail appears in the log and nowhere in the response.
 - `trace_id` is present in the body when a span is active and absent — not

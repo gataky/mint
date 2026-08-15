@@ -184,14 +184,20 @@ Real tracing setup and span creation (chunk 08). Request logging middleware
 
 - Same call site produces console output in tier 1 and a single-line JSON
   object in tier 2, in both languages.
-- **Tier 2 is byte-identical between the two languages** for an equivalent
-  set of call sites, normalizing only the timestamp and the randomly
-  generated IDs. A `diff -u` of the two outputs is empty. ADR 0010's spike
-  achieved this; anything less is a regression against proven ground.
-- **Tier 1 parity is asserted on key *names* only.** Go's tier 1 and
-  Python's tier 1 will not be byte-identical — different quoting, different
-  nested-value rendering — and `scripts/parity.sh` must not pretend
-  otherwise.
+- **Both tiers carry the same field NAMES in both languages** for an
+  equivalent set of call sites. Parse each side's JSON and compare the key
+  sets; do not compare bytes.
+
+  ADR 0017 cancelled the byte-identity requirement ADR 0010 had proven
+  achievable. A log aggregator parses JSON — it does not care about
+  separators, key order or whitespace, so `{"level":"info"}` and
+  `{ "level": "info" }` are equally correct. **Do not implement**
+  `separators=(",", ":")`, `ensure_ascii=False`, or the explicit nested-key
+  sort that byte-identity required; they buy nothing a consumer can observe.
+
+  The `level` *value* vocabulary is still a contract, because queries filter
+  on it: `debug | info | warn | error`, lowercase, with Python's `warning`
+  and `critical` normalized.
 - Every reserved field is present on every line in both tiers, except
   `trace_id`/`span_id` which are absent — not empty — with no active span,
   and absent for an `INVALID_SPAN` too.

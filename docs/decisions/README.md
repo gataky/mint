@@ -56,3 +56,4 @@ neither one owned.
 | [0014](0014-python-entrypoint-owns-its-servers-and-signals.md) | The Python root builds its own Servers and owns signals | 0010 requires `uvicorn.run(...)`; 0008 requires two Servers — `run()` cannot do both |
 | [0015](0015-the-manifests-are-the-pin-list.md) | The template manifests are the pin list, not a table | 0011's table went stale twice in one chunk — a markdown copy of an executable fact |
 | [0016](0016-unknown-keys-are-strict-in-yaml-lenient-in-env.md) | Unknown keys error in YAML, are ignored in the environment | chunk 03 had to choose and neither the spec nor 0002/0006 said |
+| [0017](0017-parity-is-a-boundary-contract-not-an-equivalence.md) | Parity is a contract at the boundaries, not an equivalence everywhere | the parity tax compounded per chunk while the benefit sat in four places |

@@ -25,8 +25,8 @@ the first release so the mint mark renders.
      set, so there is nothing to diff: assert that every question except
      `module_path` and `package_name` is unconditional and that those two are
      `when:`-gated on `language` and nothing else.
-   - **Log parity is tier 2 only, byte-identical; tier 1 is compared on key
-     names** (ADR 0010).
+   - **Log parity is field NAMES in both tiers; no formatting comparison**
+     (ADR 0017, which cancelled ADR 0010's byte-identity requirement).
    - **Metrics parity compares parsed `(family, sorted label keys, type)`
      over a Mint-owned allowlist, never raw text** (ADR 0003).
    - Config parity includes the ordered-source-list assertion — both

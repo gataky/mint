@@ -265,7 +265,9 @@ aggregation.
 - An unrouted path produces `route="__unmatched__"`; a `PROPFIND` produces
   `method="_OTHER"`. Both tested, both languages.
 - `service_owner` appears on `target_info` and on **no other series**;
-  `target_info`'s exposition line is byte-identical between the languages.
+  `target_info` carries the same label **keys** in both languages. Its
+  exposition text is not compared (ADR 0017 — and ADR 0003 already required
+  parsed comparison over raw text).
 - Python's `/metrics` contains no `_created` series.
 - The declared bucket boundaries are identical between the two services.
 - The series-budget test fails when a label is added to one of the three

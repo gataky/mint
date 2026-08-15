@@ -58,9 +58,17 @@ eleven times, which is the same principle the spec applies to everything
 else.
 
 1. **Both languages, same chunk.** Never complete Go and then port to
-   Python. Build the Go and Python sides of a chunk together and finish with
-   them at parity. Building one language to completion first is exactly the
-   drift the whole project exists to prevent.
+   Python. Build the Go and Python sides of a chunk together. Building one
+   language to completion first is exactly the drift this project exists to
+   prevent.
+
+   **"At parity" means the contracts, not equivalence**
+   ([ADR 0017](../docs/decisions/0017-parity-is-a-boundary-contract-not-an-equivalence.md)):
+   the Makefile surface, metric names and label keys, log field names, and
+   config precedence. Everything else should be *idiomatic* — write the Go
+   the way a Go developer would and the Python the way a Python developer
+   would. Porting one language's internals into the other is a defect, not
+   diligence.
 
 2. **The harness grows with the feature.** Every chunk that adds a
    guarantee also adds the check that enforces it — to `scripts/parity.sh`,

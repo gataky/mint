@@ -37,6 +37,16 @@ it in favor of these:
    Anywhere this spec says two things must match, there must be something
    in `make parity` or `make test` that fails when they stop matching.
 
+**What must match is narrower than it first appears**
+([ADR 0017](docs/decisions/0017-parity-is-a-boundary-contract-not-an-equivalence.md)).
+Parity is required only where something *outside* the service consumes the
+thing: the Makefile command surface, metric names and label keys, log field
+names, and config precedence. Everywhere else — internal layout, error
+wording, byte-level formatting, JSON key order, duration rendering — each
+language does what is idiomatic for it. The test for a proposed check is:
+if these two differed, what outside the service would break? If the answer
+is "nothing, but a diff would fail," the diff is the problem.
+
 Chunk 01 sharpened the second principle into a rule worth stating outright:
 **three of the five things this spec originally got wrong failed *silently*.**
 Pure reflection emitted an OpenAPI document that lied and still passed its
@@ -499,16 +509,19 @@ pass `colors=stream.isatty() and not os.environ.get("NO_COLOR")` to
 `ConsoleRenderer`.
 
 **Tier 2 — JSON**, one object per line. Go's `JSONHandler` wrapped in a
-custom handler; structlog's `JSONRenderer` in Python. **Proven
-byte-identical** across languages, given `separators=(",", ":")` and
-`ensure_ascii=False` to match Go's `encoding/json`.
+custom handler; structlog's `JSONRenderer` in Python.
 
-Forced consequences of that parity, all documented in `docs/logging.md`:
-Python levels normalize to slog's vocabulary (`warning`→`warn`,
-`critical`→`error`); nested dict keys must be explicitly sorted in Python
-because Go's `encoding/json` sorts map keys; **`make parity` asserts tier 2
-byte-for-byte and tier 1 on key names only**, since tint and
-`ConsoleRenderer` will never agree glyph-for-glyph.
+**The contract is the field NAMES, not the bytes** (ADR 0017). A log
+aggregator parses JSON; it does not care about separators, key order or
+whitespace. `{"level":"info"}` and `{ "level": "info" }` are equally correct.
+ADR 0010 proved byte-identity was *achievable* — that is no longer required,
+and the `separators`/`ensure_ascii`/key-sorting work it needed is cancelled.
+
+One consequence survives and is documented in `docs/logging.md`: Python
+levels normalize to slog's vocabulary (`warning`→`warn`, `critical`→`error`),
+because the *value* of the `level` field is something an aggregator queries
+on. **`make parity` asserts the field-name set in both tiers and nothing
+about formatting.**
 
 **Redaction happens in the handler**, not at call sites: a documented key
 list, applied to nested and list-embedded values, in both tiers.
@@ -722,23 +735,40 @@ service and a Python service.**
 
 ## Parity enforcement
 
-`make parity`, exiting non-zero on drift:
+`make parity` is organised into two groups, and the distinction matters more
+than the checks (ADR 0017).
 
-1. **Assert the shared question set** — with one root `copier.yml` there is
-   no second set to diff, so this becomes an assertion that every question is
-   either shared or correctly `when:`-gated, and that no language-specific
-   question exists without a counterpart.
-2. Generate both from one fixture answers file.
-3. Diff the normalized directory trees.
-4. Diff `make help` output.
-5. Boot both; diff tier-2 log output **byte-for-byte** and tier-1 **key names
-   only**, against `docs/logging.md`.
-6. Diff the operation lists from both `openapi.json` files.
-7. Diff the actual middleware chain order against `docs/architecture.md`.
-8. Diff parsed metric families — `(family, sorted label keys, type)` over the
-   Mint-owned allowlist, never raw text.
-9. Assert both config loaders report exactly `["yaml", "env"]`.
-10. Diff test case names for the shared conventions.
+**Contracts** — identical, because something outside the service breaks
+otherwise:
+
+1. `make help` — the command surface, which is what "feels identical
+   regardless of language" actually meant.
+2. Config precedence and source order — runbooks, and a ConfigMap
+   `envFrom`-ed by several services.
+3. *(chunk 04)* Log field **names**, in both tiers. Not formatting.
+4. *(chunk 08)* Metric names and label **keys**, compared as parsed
+   `(family, sorted label keys, type)` over a Mint-owned allowlist — never
+   raw text.
+
+**Template hygiene** — not parity at all; the templates being well-formed:
+
+5. Question-set shape — only `module_path`/`package_name` are `when:`-gated,
+   and only on `language`.
+6. One fixture answers file generates both languages.
+7. No `openapi.json`/`llms.txt` shipped as template files (ADR 0007).
+8. No unrendered delimiters in generated output.
+9. No Jinja default `{{ }}` syntax, which renders as literal text.
+10. The shared docs exist exactly once.
+
+**Deliberately not checked**: internal directory and file layout, error
+message wording, byte-level formatting, JSON key order and whitespace,
+duration and number rendering, internal type shapes, test-case names.
+
+Two rules the suite learned the hard way. **Assert each side succeeds before
+comparing them** — this check twice passed green while diffing two
+identically-broken outputs. And **a parity check compares the two languages
+to each other, so it cannot catch a defect they share**; that is
+`make verify`'s job.
 
 `make verify` runs `scripts/verify-template.sh`: generate both, build, boot,
 exercise `/healthz`, `/readyz`, `/metrics`, the widgets endpoints,

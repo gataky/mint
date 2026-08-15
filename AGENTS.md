@@ -45,10 +45,12 @@ and an ADR disagree, the spec is stale.
 
 ## Rules for working here
 
-- **Never change one language without the other.** A copier question, a
-  Makefile target, a log field, or a config key added to Go must be added to
-  Python in the same change. This is the single most important rule in the
-  repo, and `make parity` exists to enforce it.
+- **Never change a CONTRACT in one language without the other.** A copier
+  question, a Makefile target, a log field name, a metric name, or a config
+  key added to Go must be added to Python in the same change — those have
+  consumers outside the service. Internal structure, error wording and
+  output formatting are idiomatic per language and deliberately unchecked
+  ([ADR 0017](docs/decisions/0017-parity-is-a-boundary-contract-not-an-equivalence.md)).
 - **`templates/_common/` is for files that are genuinely identical.** If a
   file needs a language-specific word in it, it does not belong there.
   Resist `{% if language == "go" %}`.
