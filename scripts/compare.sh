@@ -170,6 +170,26 @@ else
 	failures=$((failures + 1))
 fi
 
+banner "metrics"
+# scripts/metric-families.py exits non-zero if an owned family is missing, so
+# this cannot pass by finding nothing on both sides.
+go_metrics=$(curl -sS "http://localhost:$GO_ADMIN/metrics" | python3 scripts/metric-families.py)
+go_ok=$?
+py_metrics=$(curl -sS "http://localhost:$PY_ADMIN/metrics" | python3 scripts/metric-families.py)
+py_ok=$?
+
+if ((go_ok != 0)) || ((py_ok != 0)); then
+	printf '  \033[31m✗\033[0m /metrics could not be parsed (go=%d python=%d)\n' "$go_ok" "$py_ok"
+	failures=$((failures + 1))
+elif [[ "$go_metrics" == "$py_metrics" ]]; then
+	printf '  \033[32m✓\033[0m metric families and label keys\n'
+	echo "$go_metrics" | sed 's/^/      /'
+else
+	printf '  \033[31m✗\033[0m metric families and label keys\n'
+	diff <(echo "$go_metrics") <(echo "$py_metrics") | sed 's/^/      /'
+	failures=$((failures + 1))
+fi
+
 banner "logs"
 go_keys=$(python3 -c '
 import json, sys

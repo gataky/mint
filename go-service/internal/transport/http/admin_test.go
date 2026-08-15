@@ -16,7 +16,7 @@ func newTestAdmin(t *testing.T, checks ...Check) (http.Handler, *Health) {
 	for _, check := range checks {
 		health.Register(check)
 	}
-	return NewAdmin(health), health
+	return NewAdmin(health, nil), health
 }
 
 func TestLivenessIgnoresDependencies(t *testing.T) {

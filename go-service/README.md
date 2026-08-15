@@ -74,6 +74,7 @@ in `internal/service`, implement it elsewhere, and inject it from `main.go`.
 | GET | `/docs` | 200 | Swagger UI |
 | GET | `/healthz` | 200 | admin port; liveness, touches no dependency |
 | GET | `/readyz` | 200, 503 | admin port; runs the registered checks |
+| GET | `/metrics` | 200 | admin port; Prometheus exposition |
 
 Errors are RFC 9457 `application/problem+json`:
 
@@ -125,10 +126,38 @@ can reach every container port. Mid-drain a split admin port still answers
 Setting `admin_port` equal to `port` collapses both onto one listener, and is
 supported.
 
+## Metrics
+
+On the admin port at `/metrics`:
+
+| metric | labels |
+| --- | --- |
+| `http_server_requests_total` | `method`, `route`, `status` |
+| `http_server_request_duration_seconds` | `method`, `route`, `status` |
+| `http_server_active_requests` | `method` |
+
+Buckets are OpenTelemetry's advisory set, declared literally rather than taken
+from the library's defaults.
+
+`route` is the registered template, never the concrete path, and an unrouted
+request is labelled `<unmatched>` — otherwise anyone could create unbounded
+series by requesting random URLs.
+
+The in-flight gauge carries no `route` label, because the route is not known
+when a request begins. OpenTelemetry's own convention omits it for the same
+reason.
+
+**`service_owner` is not a label.** It lives on
+`target_info{service_name,service_version,service_owner,deployment_environment_name}`,
+joinable with Prometheus 3's `info()`. A re-org would otherwise change the
+identity of every series and break `rate()` across the boundary.
+
+The admin surface is not instrumented: a readiness probe every second and a
+scrape every fifteen would be most of the metrics.
+
 ## Not built yet
 
-Metrics, OpenTelemetry tracing, and a generated `llms.txt`. The seams are in
-place: `ctx` is the first argument of every service method, the logger is
-reached through the context, the middleware chain has named empty slots for
-tracing, metrics and auth, and the access log already records the route
-*template* rather than the concrete path.
+OpenTelemetry tracing and a generated `llms.txt`. The seams are in place: `ctx`
+is the first argument of every service method, the logger is reached through the
+context, and the middleware chain has a named empty slot for tracing outside
+metrics and logging.

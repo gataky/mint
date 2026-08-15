@@ -82,6 +82,7 @@ Widgets are held in memory. A real service would define a repository protocol in
 | GET | `/docs` | 200 | Swagger UI |
 | GET | `/healthz` | 200 | admin port; liveness, touches no dependency |
 | GET | `/readyz` | 200, 503 | admin port; runs the registered checks |
+| GET | `/metrics` | 200 | admin port; Prometheus exposition |
 
 Errors are RFC 9457 `application/problem+json`:
 
@@ -143,10 +144,40 @@ nowhere near the change that caused it.
 Run it with `python -m widget_svc`, never the `uvicorn` CLI — the CLI configures
 logging before importing the app.
 
+## Metrics
+
+On the admin port at `/metrics`:
+
+| metric | labels |
+| --- | --- |
+| `http_server_requests_total` | `method`, `route`, `status` |
+| `http_server_request_duration_seconds` | `method`, `route`, `status` |
+| `http_server_active_requests` | `method` |
+
+Buckets are OpenTelemetry's advisory set, declared literally rather than taken
+from the library's defaults. `disable_created_metrics()` suppresses the
+`_created` gauge each counter would otherwise carry — through the API, not the
+`PROMETHEUS_DISABLE_CREATED_SERIES` environment variable, because configuration
+is read in exactly one place and this is not it.
+
+`route` is the registered template, never the concrete path, and an unrouted
+request is labelled `<unmatched>`. It is read from `scope["route"]` *after* the
+router has run: resolving it early by re-running the match was tried and
+rejected, because FastAPI wraps included routers in a private type whose shape
+changes between releases. That is also why the in-flight gauge carries no
+`route` label — and OpenTelemetry's own convention omits it for the same reason.
+
+**`service_owner` is not a label.** It lives on `target_info`, joinable with
+Prometheus 3's `info()`.
+
+**Phase 1 assumes a single worker.** `prometheus_client`'s multiprocess mode
+needs `PROMETHEUS_MULTIPROC_DIR` and `multiprocess_mode="livesum"`; without
+them, more than one uvicorn worker makes the in-flight gauge report one worker's
+view rather than the process group's.
+
 ## Not built yet
 
-Metrics, OpenTelemetry tracing, and a generated `llms.txt`. The seams are in
-place: handlers and service methods are `async`, request-scoped log fields ride
-on contextvars (which is what OTel uses), the middleware chain has named empty
-slots for tracing, metrics and auth, and the access log already records the
-route *template* rather than the concrete path.
+OpenTelemetry tracing and a generated `llms.txt`. The seams are in place:
+handlers and service methods are `async`, request-scoped log fields ride on
+contextvars (which is what OTel uses), and the middleware chain has a named
+empty slot for tracing outside metrics and logging.

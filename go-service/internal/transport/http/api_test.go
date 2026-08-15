@@ -30,11 +30,12 @@ func newTestAPI(t *testing.T) (http.Handler, *bytes.Buffer) {
 	})
 
 	cfg := config.Defaults()
+	mux := NewAPI(cfg, service.NewWidgets(), logger)
 	handler := Chain(
-		NewAPI(cfg, service.NewWidgets(), logger),
+		mux,
 		Recovery(logger),
 		RequestContext(),
-		Logging(logger),
+		Logging(logger, MuxResolver(mux)),
 		Timeout(cfg.Server.RequestTimeout),
 	)
 	return handler, logs
@@ -269,7 +270,8 @@ func TestPanicIsRecoveredAsProblemJSON(t *testing.T) {
 	exploding := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		panic("handler exploded")
 	})
-	handler := Chain(exploding, Recovery(logger), RequestContext(), Logging(logger))
+	handler := Chain(exploding, Recovery(logger), RequestContext(),
+		Logging(logger, func(r *http.Request) string { return r.URL.Path }))
 
 	rec := do(t, handler, http.MethodGet, "/boom", "")
 

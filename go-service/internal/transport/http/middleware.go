@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/jeffmgreg/widget-svc/internal/logging"
+	"github.com/jeffmgreg/widget-svc/internal/observability"
 )
 
 // RequestIDHeader carries the request correlation ID in and out.
@@ -22,12 +23,12 @@ type Middleware func(http.Handler) http.Handler
 //
 // The order is fixed and deliberate:
 //
-//	recovery -> request-id -> [tracing] -> [metrics] -> logging -> [auth] -> timeout -> handler
+//	recovery -> request-id -> [tracing] -> metrics -> logging -> [auth] -> timeout -> handler
 //
 // Bracketed entries are not built yet. Their positions are what matters:
 //
-//   - tracing and metrics sit outside logging so a log line can carry the
-//     trace ID that the tracing middleware put on the context.
+//   - tracing sits outside metrics and logging so both can carry the trace ID
+//     it put on the context, and so a span covers the whole request.
 //   - auth sits INSIDE logging and metrics — observe everything, then
 //     authorize, then execute. An access log that omits rejected requests is a
 //     success log; it cannot answer "401s are spiking, from where?". The
@@ -39,35 +40,6 @@ func Chain(h http.Handler, middleware ...Middleware) http.Handler {
 		h = middleware[i](h)
 	}
 	return h
-}
-
-// routeBox lets an inner layer report the matched route template back to an
-// outer one. The outer middleware runs before routing, so it cannot know the
-// template; the box is placed on the context on the way in and filled by the
-// huma middleware on the way through.
-//
-// The route template — not the concrete path — is what the access log records
-// and what a metrics label will use, so that /widgets/abc and /widgets/def are
-// one series rather than two.
-type routeBox struct{ pattern string }
-
-type routeBoxKey struct{}
-
-func withRouteBox(ctx context.Context, box *routeBox) context.Context {
-	return context.WithValue(ctx, routeBoxKey{}, box)
-}
-
-func routeBoxFrom(ctx context.Context) *routeBox {
-	box, _ := ctx.Value(routeBoxKey{}).(*routeBox)
-	return box
-}
-
-// SetRoute records the matched route template for the current request, if
-// anything is listening. Safe to call when nothing is.
-func SetRoute(ctx context.Context, pattern string) {
-	if box := routeBoxFrom(ctx); box != nil {
-		box.pattern = pattern
-	}
 }
 
 type requestIDKey struct{}
@@ -141,10 +113,35 @@ func RequestContext() Middleware {
 	}
 }
 
+// Metrics records the three HTTP server metrics.
+//
+// It sits outside Logging so that both observe the same requests, and inside
+// tracing so a future exemplar can carry the trace ID.
+func Metrics(m *observability.Metrics, resolve RouteResolver) Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			start := time.Now()
+
+			// The in-flight gauge is labelled by method alone; the route is
+			// resolved for the counter and histogram below.
+			m.RequestStarted(r.Method)
+
+			recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+			// The gauge must come down even if the handler panics; Recovery is
+			// outside this middleware and would otherwise leak the increment.
+			defer func() {
+				m.RequestFinished(r.Method, resolve(r), recorder.status, time.Since(start))
+			}()
+
+			next.ServeHTTP(recorder, r)
+		})
+	}
+}
+
 // Logging emits one structured line per request and puts a request-scoped
 // logger on the context, so anything a handler logs carries the same
 // request_id without being passed a logger.
-func Logging(logger *slog.Logger) Middleware {
+func Logging(logger *slog.Logger, resolve RouteResolver) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
@@ -153,23 +150,15 @@ func Logging(logger *slog.Logger) Middleware {
 			scoped := logger.With(slog.String(logging.KeyRequestID, RequestIDFrom(ctx)))
 			ctx = logging.NewContext(ctx, scoped)
 
-			box := &routeBox{}
-			ctx = withRouteBox(ctx, box)
-
 			recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 			next.ServeHTTP(recorder, r.WithContext(ctx))
 
-			route := box.pattern
-			if route == "" {
-				// Nothing claimed a template: either the request 404'd before
-				// reaching a route, or it hit a handler registered on a fixed
-				// path, where path and template are the same thing.
-				route = r.URL.Path
-			}
-
+			// route is the template and path is what was actually asked for.
+			// Both are logged: the template is what you group by, the path is
+			// what you need when reading one line.
 			scoped.LogAttrs(ctx, levelFor(recorder.status), "request",
 				slog.String("method", r.Method),
-				slog.String("route", route),
+				slog.String("route", resolve(r)),
 				slog.String("path", r.URL.Path),
 				slog.Int("status", recorder.status),
 				slog.Int64("duration_ms", time.Since(start).Milliseconds()),

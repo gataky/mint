@@ -26,6 +26,7 @@ from widget_svc.api.health import Health
 from widget_svc.config import Config
 from widget_svc.log import configure as configure_logging
 from widget_svc.log import logger
+from widget_svc.observability import Metrics
 from widget_svc.service import Widgets
 
 
@@ -83,16 +84,17 @@ def main(argv: list[str] | None = None) -> int:
 
     widgets = Widgets()
     health = Health()
+    metrics = Metrics(config)
 
     try:
-        asyncio.run(serve(config, listeners(config, widgets, health), health))
+        asyncio.run(serve(config, listeners(config, widgets, health, metrics), health))
     except Exception as exc:
         logger.opt(exception=exc).error("fatal")
         return 1
     return 0
 
 
-def listeners(config: Config, widgets: Widgets, health: Health) -> list[Listener]:
+def listeners(config: Config, widgets: Widgets, health: Health, metrics: Metrics) -> list[Listener]:
     """The listeners to run.
 
     When ``admin_port`` equals ``port`` the two apps collapse onto a single
@@ -105,8 +107,8 @@ def listeners(config: Config, widgets: Widgets, health: Health) -> list[Listener
     final metrics scrape; collapsed onto one listener, both become
     connection-refused.
     """
-    api = create_api(config, widgets)
-    admin = create_admin(config, health)
+    api = create_api(config, widgets, metrics)
+    admin = create_admin(config, health, metrics)
 
     if not config.split_listeners():
         api.mount("/", admin)

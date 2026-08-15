@@ -7,6 +7,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/jeffmgreg/widget-svc/internal/observability"
 )
 
 // Check is one readiness probe: a dependency the service needs, with its own
@@ -59,10 +61,19 @@ type healthBody struct {
 	Checks []checkResult `json:"checks"`
 }
 
-// NewAdmin builds the admin handler: liveness, readiness, and — once metrics
-// land — /metrics. It is served on its own port by default.
-func NewAdmin(health *Health) http.Handler {
+// NewAdmin builds the admin handler: liveness, readiness and /metrics. It is
+// served on its own port by default.
+//
+// metrics may be nil, which omits the /metrics route — useful in tests that do
+// not care about instrumentation.
+func NewAdmin(health *Health, metrics *observability.Metrics) *http.ServeMux {
 	mux := http.NewServeMux()
+
+	if metrics != nil {
+		// Scraped, never access-logged: a scrape every 15 seconds would be the
+		// bulk of the log volume on a quiet service.
+		mux.Handle("GET /metrics", metrics.Handler())
+	}
 
 	// Liveness answers one question: is the process running? It touches no
 	// dependency, ever. A liveness probe that checks a database restarts the

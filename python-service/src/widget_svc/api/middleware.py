@@ -2,12 +2,12 @@
 
 Order, outermost first::
 
-    recovery -> request-id -> [tracing] -> [metrics] -> logging -> [auth] -> timeout -> handler
+    recovery -> request-id -> [tracing] -> metrics -> logging -> [auth] -> timeout -> handler
 
 Bracketed entries are not built yet. Their positions are what matters:
 
-* tracing and metrics sit outside logging, so a log line can carry the trace ID
-  the tracing middleware put on the context.
+* tracing sits outside metrics and logging so both can carry the trace ID it
+  put on the context, and so a span covers the whole request.
 * auth sits **inside** logging and metrics — observe everything, then authorize,
   then execute. An access log that omits rejected requests is a success log; it
   cannot answer "401s are spiking, from where?". The accepted cost is that an
@@ -33,7 +33,9 @@ from starlette.status import HTTP_504_GATEWAY_TIMEOUT
 from starlette.types import ASGIApp
 
 from widget_svc.api.problem import problem
+from widget_svc.api.route import resolve_route
 from widget_svc.log import logger
+from widget_svc.observability import Metrics
 
 #: Carries the request correlation ID in and out.
 REQUEST_ID_HEADER = "X-Request-Id"
@@ -59,6 +61,45 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         return response
 
 
+class MetricsMiddleware(BaseHTTPMiddleware):
+    """Records the three HTTP server metrics.
+
+    Sits outside the access log so both observe the same requests, and inside
+    tracing so a future exemplar can carry the trace ID.
+    """
+
+    def __init__(self, app: ASGIApp, metrics: Metrics) -> None:
+        super().__init__(app)
+        self.metrics = metrics
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        started = time.perf_counter()
+
+        # The in-flight gauge is labelled by method alone, because the route is
+        # not known until the router has run. See resolve_route.
+        self.metrics.request_started(request.method)
+        try:
+            response = await call_next(request)
+        except BaseException:
+            # The gauge must come down even when the handler raises, or it
+            # climbs by one on every failure and never returns to zero.
+            self.metrics.request_finished(
+                request.method,
+                resolve_route(request.scope),
+                500,
+                time.perf_counter() - started,
+            )
+            raise
+
+        self.metrics.request_finished(
+            request.method,
+            resolve_route(request.scope),
+            response.status_code,
+            time.perf_counter() - started,
+        )
+        return response
+
+
 class AccessLogMiddleware(BaseHTTPMiddleware):
     """Emits one structured line per request."""
 
@@ -68,9 +109,8 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
         elapsed_ms = int((time.perf_counter() - started) * 1000)
 
         # The route *template*, not the concrete path: /widgets/abc and
-        # /widgets/def are one series, not two. Starlette records the matched
-        # route on the scope during routing.
-        route = getattr(request.scope.get("route"), "path", None) or request.url.path
+        # /widgets/def are one series, not two.
+        route = resolve_route(request.scope)
 
         log = logger.bind(
             method=request.method,

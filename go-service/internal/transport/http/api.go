@@ -21,7 +21,11 @@ import (
 
 // NewAPI builds the public API handler: the widget operations, the OpenAPI 3.1
 // document at /openapi.json, and Swagger UI at /docs.
-func NewAPI(cfg config.Config, widgets *service.Widgets, logger *slog.Logger) http.Handler {
+//
+// It returns the concrete *http.ServeMux rather than an http.Handler so the
+// middleware can ask it to resolve a route template before dispatch — see
+// MuxResolver.
+func NewAPI(cfg config.Config, widgets *service.Widgets, logger *slog.Logger) *http.ServeMux {
 	configureErrorModel()
 
 	mux := http.NewServeMux()
@@ -38,13 +42,6 @@ func NewAPI(cfg config.Config, widgets *service.Widgets, logger *slog.Logger) ht
 	humaCfg.SchemasPath = ""
 
 	api := humago.New(mux, humaCfg)
-
-	// Report the matched route template outward, so the access log records
-	// /widgets/{id} rather than /widgets/2f8a1c.
-	api.UseMiddleware(func(ctx huma.Context, next func(huma.Context)) {
-		SetRoute(ctx.Context(), ctx.Operation().Path)
-		next(ctx)
-	})
 
 	registerWidgets(api, widgets)
 

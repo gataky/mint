@@ -63,6 +63,9 @@ Only the things something outside the service consumes:
 - **Log field names** in both tiers, and the level vocabulary
   (`debug`/`info`/`warn`/`error` — Python's `warning` and `critical` are
   normalized).
+- **Metric names and label keys**, compared as parsed families over a
+  Mint-owned allowlist — never raw text, because Python renders `le="1.0"`
+  against Go's `le="1"` and the two expose different runtime collectors.
 - **Config precedence and environment variable names.**
 - **The Makefile target list.**
 
@@ -119,23 +122,19 @@ Add direnv's hook to your shell, then `direnv allow` in each service directory.
 ## Where this is going
 
 **Built:** config, two log tiers, the error contract, the HTTP transport, health
-endpoints, graceful shutdown, OpenAPI 3.1 with Swagger UI, tests, Makefiles,
-asdf and direnv.
+endpoints, Prometheus metrics, graceful shutdown, OpenAPI 3.1 with Swagger UI,
+tests, Makefiles, asdf and direnv.
 
 **Next, in rough order:**
 
-1. **Metrics** — `http_server_requests_total`, `_request_duration_seconds` and
-   `_active_requests` on the admin port. Purely additive: one middleware and one
-   route. The access log already records the route *template*, so the label
-   cardinality problem is already solved.
-2. **OpenTelemetry tracing** — `trace_id` and `span_id` join every log line.
+1. **OpenTelemetry tracing** — `trace_id` and `span_id` join every log line.
    The seams are in: Go threads `ctx` through every service method and reaches
    the logger through it; Python's handlers are `async` and its request fields
    ride on contextvars, which is the same mechanism OTel uses.
-3. **A conformance test** — `scripts/compare.sh` is a script you read the output
+2. **A conformance test** — `scripts/compare.sh` is a script you read the output
    of, not a test suite. Promoting it to something that runs in CI is a
    deliberate later step.
-4. **Copier templates** — parameterize `service_name`, `module_path` /
+3. **Copier templates** — parameterize `service_name`, `module_path` /
    `package_name`, ports and owner, and move both trees under `templates/`.
 
 **Deliberately not built:** authentication (expected at a gateway; the

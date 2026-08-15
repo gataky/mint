@@ -16,6 +16,7 @@ import (
 
 	"github.com/jeffmgreg/widget-svc/internal/config"
 	"github.com/jeffmgreg/widget-svc/internal/logging"
+	"github.com/jeffmgreg/widget-svc/internal/observability"
 	"github.com/jeffmgreg/widget-svc/internal/service"
 	transport "github.com/jeffmgreg/widget-svc/internal/transport/http"
 )
@@ -78,20 +79,28 @@ func run() error {
 	widgets := service.NewWidgets()
 	health := transport.NewHealth()
 
+	metrics, err := observability.NewMetrics(cfg)
+	if err != nil {
+		return fmt.Errorf("build metrics: %w", err)
+	}
+
+	apiMux := transport.NewAPI(cfg, widgets, logger)
 	api := transport.Chain(
-		transport.NewAPI(cfg, widgets, logger),
+		apiMux,
 		transport.Recovery(logger),
 		transport.RequestContext(),
-		// tracing and metrics belong here, outside logging.
-		transport.Logging(logger),
+		// tracing belongs here, outside metrics and logging.
+		transport.Metrics(metrics, transport.MuxResolver(apiMux)),
+		transport.Logging(logger, transport.MuxResolver(apiMux)),
 		// auth belongs here: after observation, before execution.
 		transport.Timeout(cfg.Server.RequestTimeout),
 	)
 
-	// The admin surface is not part of the request-timeout budget and is not
-	// access-logged: a readiness probe every second would drown the log.
+	// The admin surface is not instrumented, not access-logged, and not part of
+	// the request-timeout budget: a readiness probe every second and a scrape
+	// every fifteen would be most of both the log volume and the metrics.
 	admin := transport.Chain(
-		transport.NewAdmin(health),
+		transport.NewAdmin(health, metrics),
 		transport.Recovery(logger),
 		transport.RequestContext(),
 	)
