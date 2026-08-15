@@ -68,7 +68,7 @@ MINT_ + UPPER( config key path, joined with __ )
 | `logging.level` | `MINT_LOGGING__LEVEL` |
 | `observability.tracing.otlp_endpoint` | `MINT_OBSERVABILITY__TRACING__OTLP_ENDPOINT` |
 | `observability.metrics.namespace` | `MINT_OBSERVABILITY__METRICS__NAMESPACE` |
-| `database.password` *(illustrative)* | `MINT_DATABASE__PASSWORD` |
+| `database.password` | `MINT_DATABASE__PASSWORD` |
 
 ### There are no aliases
 
@@ -97,6 +97,24 @@ languages in one change.
   empty" and fails validation naming the variable. It does not fall through
   to YAML.
 
+### Unknown keys: strict in YAML, ignored in the environment
+
+An unrecognised key in `config/config.yaml` or `config/config.local.yaml` is
+a **startup error** naming the file and the key. That file has exactly one
+writer — this service — so a key it doesn't recognise is a typo with no other
+explanation.
+
+An unrecognised `MINT_` environment variable is **ignored**. The environment
+is shared: with one ConfigMap `envFrom`-ed by several Deployments, or several
+services in one compose project, a `MINT_` variable may legitimately belong
+to a sibling. Erroring would make the second service fail for the first
+service's configuration.
+
+The cost is real and worth knowing: **a misspelled variable is silent.**
+`MINT_SERVER__PROT=8080` starts the service on the default port without
+complaint. `--print-config` is how you check — it shows the resolved value
+and where it came from.
+
 ### One cost of a constant prefix
 
 Two Mint services sharing a single environment source — a root `.env` in a
@@ -114,6 +132,12 @@ debugging.
 
 `local` is the default when unset, and it is what selects the human-readable
 log tier and the quiet no-op trace exporter.
+
+`logging.format` is `auto`, `console` or `json`, defaulting to **`auto`** —
+the console renderer when `MINT_ENV=local`, one JSON object per line
+everywhere else. A sentinel is needed because "follow the environment" is a
+third state, distinct from pinning either tier: setting `console` or `json`
+explicitly overrides the environment rather than agreeing with it.
 
 ## Variables this service does not own
 
@@ -141,10 +165,15 @@ and the variable that sets it:
 
 ```
 config: 3 errors
-  - server.port (MINT_SERVER__PORT): "not-a-number" is not an integer
-  - server.timeouts.read_header (MINT_SERVER__TIMEOUTS__READ_HEADER): "abc" is not a duration
   - env (MINT_ENV): "bogus" is not one of local, dev, staging, prod
+  - server.port (MINT_SERVER__PORT): "nope" is not an integer
+  - server.timeouts.read_header (MINT_SERVER__TIMEOUTS__READ_HEADER): "abc" is not a duration
 ```
+
+Errors come out in **declaration order** — the order the fields appear in the
+config type — not in the order the values were supplied or discovered. That
+is stable across runs, identical in both languages, and free in Python, where
+it is what pydantic does natively.
 
 Fixing one error at a time across three restarts is the experience this
 avoids.
@@ -158,6 +187,11 @@ avoids.
   the type — not from the field's name, and not from remembering to mask at
   each call site. A marked field is masked in `--print-config`, in logs, and
   in error messages, automatically.
+
+`database.password` ships empty and is read by nothing. It exists so the
+masking mechanism is demonstrated rather than described — a service that
+later grows a database inherits a worked example instead of a paragraph. Its
+presence is why `make config` has a masked row to show.
 
 A real secrets provider would be wired in `internal/config` and nowhere else.
 
