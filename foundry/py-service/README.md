@@ -3,7 +3,7 @@
 A small HTTP service: three layers, structured logging, metrics, tracing,
 RFC 9457 errors, and an OpenAPI 3.1 document served with Swagger UI.
 
-This is one of two reference implementations in [Mint](../README.md). The Go
+This is one of two reference implementations in [Mint](../../README.md). The Go
 service exposes the same API and the same Makefile targets; a client should not
 be able to tell which one it is talking to.
 

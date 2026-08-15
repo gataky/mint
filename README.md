@@ -9,12 +9,13 @@ template for minting new services, in either language.
 
 ```
 mint/
-├── go-service/       Go 1.26 · net/http · huma · koanf · slog + tint · OTel
-├── py-service/       Python 3.14 · FastAPI · uvicorn · pydantic-settings · loguru · OTel
+├── foundry/          the two reference services — runnable, and where a change starts
+│   ├── go-service/   Go 1.26 · net/http · huma · koanf · slog + tint · OTel
+│   └── py-service/   Python 3.14 · FastAPI · uvicorn · pydantic-settings · loguru · OTel
 ├── copier.yml        the template definition — one, at the repo root
-└── templates/
-    ├── go-service/template/   the parameterized copy of go-service/
-    └── py-service/template/   the parameterized copy of py-service/
+└── templates/        the deliverable — what Copier renders into a new service
+    ├── go-service/template/   the parameterized copy of foundry/go-service/
+    └── py-service/template/   the parameterized copy of foundry/py-service/
 ```
 
 The two services stay runnable: they are the reference, and the templates are
@@ -46,15 +47,15 @@ language.
 ## Quick start
 
 ```sh
-make -C go-service run          # :8080, admin :9080
-make -C py-service run          # same ports — run one at a time
+make run-go                     # :8080, admin :9080
+make run-py                     # same ports — run one at a time
 ```
 
 Both default to the same ports on purpose: they are the same service. To run
 them side by side, override one:
 
 ```sh
-MINT_SERVER__PORT=8081 MINT_SERVER__ADMIN_PORT=9081 make -C py-service run
+MINT_SERVER__PORT=8081 MINT_SERVER__ADMIN_PORT=9081 make -C foundry/py-service run
 ```
 
 ## Commands

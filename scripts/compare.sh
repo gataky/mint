@@ -14,10 +14,27 @@ set -uo pipefail
 
 cd "$(dirname "$0")/.."
 
+# The two reference services live under foundry/; the Copier templates under
+# templates/ are a separate tree and are not what this script compares.
+GO_SVC=foundry/go-service
+PY_SVC=foundry/py-service
+
 GO_PORT=18080
 GO_ADMIN=19080
 PY_PORT=18081
 PY_ADMIN=19081
+
+# A process left over from an earlier run makes one service fail to bind, and
+# the symptom is a handful of unrelated "differences" further down — traceparent
+# missing, the access log unparseable. Fail here instead, where it is obvious.
+for port in $GO_PORT $GO_ADMIN $PY_PORT $PY_ADMIN; do
+	if lsof -ti "tcp:$port" >/dev/null 2>&1; then
+		printf 'port %s is already in use; compare.sh needs %s %s %s %s free\n' \
+			"$port" "$GO_PORT" "$GO_ADMIN" "$PY_PORT" "$PY_ADMIN" >&2
+		lsof -i "tcp:$port" >&2
+		exit 1
+	fi
+done
 
 TMP=$(mktemp -d)
 trap 'kill ${GO_PID-} ${PY_PID-} 2>/dev/null; wait ${GO_PID-} ${PY_PID-} 2>/dev/null; rm -rf "$TMP"' EXIT
@@ -65,13 +82,21 @@ compare_admin() {
 
 banner "starting both services"
 
-(cd go-service && go build -o "$TMP/widget-svc" ./cmd/widget-svc) || exit 1
+(cd "$GO_SVC" && go build -o "$TMP/widget-svc" ./cmd/widget-svc) || exit 1
 MINT_SERVER__PORT=$GO_PORT MINT_SERVER__ADMIN_PORT=$GO_ADMIN MINT_LOGGING__FORMAT=json \
 	"$TMP/widget-svc" >"$TMP/go.log" 2>&1 &
 GO_PID=$!
 
-(cd py-service && MINT_SERVER__PORT=$PY_PORT MINT_SERVER__ADMIN_PORT=$PY_ADMIN \
-	MINT_LOGGING__FORMAT=json uv run python -m widget_svc >"$TMP/py.log" 2>&1) &
+# Sync first and then exec the venv interpreter, rather than `uv run` inside a
+# subshell. Both of those put a process between $! and the server: the kill in
+# the trap reaps the wrapper, the server keeps the ports, and the next run of
+# this script reports differences that are really one leaked process.
+(cd "$PY_SVC" && uv sync --quiet) || exit 1
+(
+	cd "$PY_SVC" || exit 1
+	exec env MINT_SERVER__PORT=$PY_PORT MINT_SERVER__ADMIN_PORT=$PY_ADMIN \
+		MINT_LOGGING__FORMAT=json .venv/bin/python -m widget_svc
+) >"$TMP/py.log" 2>&1 &
 PY_PID=$!
 
 for _ in $(seq 1 40); do
@@ -250,8 +275,8 @@ else
 fi
 
 banner "make help"
-go_targets=$(make -C go-service help | grep -oE '^  [a-z-]+' | tr -d ' ' | sort)
-py_targets=$(make -C py-service help | grep -oE '^  [a-z-]+' | tr -d ' ' | sort)
+go_targets=$(make -C "$GO_SVC" help | grep -oE '^  [a-z-]+' | tr -d ' ' | sort)
+py_targets=$(make -C "$PY_SVC" help | grep -oE '^  [a-z-]+' | tr -d ' ' | sort)
 if [[ "$go_targets" == "$py_targets" ]]; then
 	printf '  \033[32m✓\033[0m the two Makefiles expose the same targets\n'
 else
@@ -261,8 +286,8 @@ else
 fi
 
 banner "config"
-go_config=$(cd go-service && make --no-print-directory config | sed 's/#.*//' | sed 's/[[:space:]]*$//')
-py_config=$(cd py-service && make --no-print-directory config | sed 's/#.*//' | sed 's/[[:space:]]*$//')
+go_config=$(cd "$GO_SVC" && make --no-print-directory config | sed 's/#.*//' | sed 's/[[:space:]]*$//')
+py_config=$(cd "$PY_SVC" && make --no-print-directory config | sed 's/#.*//' | sed 's/[[:space:]]*$//')
 if [[ "$go_config" == "$py_config" ]]; then
 	printf '  \033[32m✓\033[0m effective config is identical\n'
 else

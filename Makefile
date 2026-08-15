@@ -1,13 +1,13 @@
 # Mint — the top level. Most targets fan out to both reference services; `mint`
 # and `verify` are about the Copier templates under templates/.
 #
-# The per-service targets are the real interface; see go-service/Makefile and
-# py-service/Makefile. Every target below exists in both.
+# The per-service targets are the real interface; see foundry/go-service/Makefile
+# and foundry/py-service/Makefile. Every target below exists in both.
 
 .DEFAULT_GOAL := help
 SHELL := /usr/bin/env bash
 
-SERVICES := go-service py-service
+SERVICES := foundry/go-service foundry/py-service
 
 # Pinned rather than resolved, so two developers minting on different days get
 # the same Copier.
@@ -20,7 +20,7 @@ help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@printf '\nEach service has the same targets:\n'
-	@printf '  make -C go-service help\n  make -C py-service help\n\n'
+	@printf '  make -C foundry/go-service help\n  make -C foundry/py-service help\n\n'
 
 test: ## Run both services' tests
 	@$(foreach s,$(SERVICES),printf '\n\033[1m== $(s) ==\033[0m\n' && $(MAKE) --no-print-directory -C $(s) test &&) true
@@ -50,7 +50,7 @@ verify: ## Generate from the templates, then build, test, lint and boot them (ON
 	@./scripts/verify-template.sh $(ONLY)
 
 run-go: ## Boot the Go service
-	@$(MAKE) --no-print-directory -C go-service run
+	@$(MAKE) --no-print-directory -C foundry/go-service run
 
 run-py: ## Boot the Python service
-	@$(MAKE) --no-print-directory -C py-service run
+	@$(MAKE) --no-print-directory -C foundry/py-service run

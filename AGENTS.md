@@ -5,8 +5,8 @@ Context for coding agents working in this repo. Read `README.md` first.
 Each service has its own `AGENTS.md` with the rules specific to it. Read the one
 for the service you are changing:
 
-- [`go-service/AGENTS.md`](go-service/AGENTS.md)
-- [`py-service/AGENTS.md`](py-service/AGENTS.md)
+- [`foundry/go-service/AGENTS.md`](foundry/go-service/AGENTS.md)
+- [`foundry/py-service/AGENTS.md`](foundry/py-service/AGENTS.md)
 
 ## The one rule that spans both
 
@@ -41,10 +41,14 @@ make help      # every target
 
 ## The templates
 
-`go-service/` and `py-service/` are **reference services**: they stay runnable,
-they are what `make compare` diffs, and they are where a new idea is worked out.
-`templates/<lang>-service/template/` is the **deliverable**: a parameterized
-copy of that tree that Copier renders into a new service.
+`foundry/go-service/` and `foundry/py-service/` are **reference services**: they
+stay runnable, they are what `make compare` diffs, and they are where a new idea
+is worked out. `templates/<lang>-service/template/` is the **deliverable**: a
+parameterized copy of that tree that Copier renders into a new service.
+
+The two trees are siblings, not nested — `foundry/` moving does not move
+`templates/`, and nothing under `templates/` may reference a path under
+`foundry/`, because a generated service has no foundry.
 
 A change to a reference service does not reach the template by itself. Land it
 in both, in the same change, and run `make verify`.
@@ -52,6 +56,8 @@ in both, in the same change, and run `make verify`.
 ```
 copier.yml                       the single template definition, at the repo root
 questions-shared.yml             the language-agnostic question set, !include-ed
+foundry/go-service/              the runnable Go reference service
+foundry/py-service/              the runnable Python reference service
 templates/go-service/template/   the parameterized Go tree
 templates/py-service/template/   the parameterized Python tree
 scripts/verify-template.sh       generate → build → test → lint → boot → assert
