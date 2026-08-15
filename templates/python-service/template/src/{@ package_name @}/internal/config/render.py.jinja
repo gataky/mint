@@ -37,7 +37,8 @@ def render(settings: Settings) -> str:
 
     for entry in fields():
         value = display(value_at(settings, entry.path))
-        lines.append(f"  {entry.path:<{KEY_WIDTH}} {value:<{VALUE_WIDTH}} {settings.origin(entry.path)}")
+        origin = settings.origin(entry.path)
+        lines.append(f"  {entry.path:<{KEY_WIDTH}} {value:<{VALUE_WIDTH}} {origin}")
 
     lines += ["", "secrets are masked; see docs/config.md", ""]
 

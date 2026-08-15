@@ -18,6 +18,8 @@
 #   7  no unrendered template delimiters in generated output
 #   8  the shared docs exist exactly once
 #   9  no Jinja default {{ }} syntax, which renders as literal text
+#  10  `make config` succeeds in both, then matches
+#  11  ordered config sources are exactly ["yaml", "env"] (ADR 0006)
 #
 # Four of these (5, 7, 8, 9) exist because something slipped through the
 # others. A check earns its place by having caught something.
@@ -333,6 +335,56 @@ else
   fail "Jinja default {{ }} syntax in a template" "Mint's variable delimiter is {@ @}. These render as literal text with
 no error — the variable simply will not interpolate:
 $default_syntax"
+fi
+
+# --- 10 & 11. Configuration (chunk 03) -------------------------------------
+#
+# Both must SUCCEED before they are compared — the same rule check 5 learned
+# the hard way. Two identically-broken `make config` runs would otherwise
+# compare equal and pass.
+
+if [[ -d "$WORK/go" && -d "$WORK/py" ]]; then
+  go_cfg=$(make -C "$WORK/go" config 2>&1 | strip_ansi); go_rc=$?
+  py_cfg=$(make -C "$WORK/py" config 2>&1 | strip_ansi); py_rc=$?
+
+  if [[ $go_rc -ne 0 || $py_rc -ne 0 ]]; then
+    fail "\`make config\` runs" "must exit 0 in both before its output means anything.
+go=$go_rc python=$py_rc
+
+go:
+$go_cfg
+
+python:
+$py_cfg"
+  elif diff_out=$(diff <(echo "$go_cfg") <(echo "$py_cfg")); then
+    pass "\`make config\` succeeds in both and output is identical"
+  else
+    fail "\`make config\` output" "< go-service   > python-service
+$diff_out"
+  fi
+
+  # The ordered source list is the one place precedence is expressed. ADR
+  # 0006: pydantic_settings defaults to a FOUR-source chain and silently let
+  # a .env file beat YAML, so this is the check that turns a reintroduced
+  # dotenv_settings into a build failure rather than a production surprise.
+  want="yaml, env"
+  go_src=$(echo "$go_cfg" | sed -n 's/^sources, lowest precedence first: //p')
+  py_src=$(echo "$py_cfg" | sed -n 's/^sources, lowest precedence first: //p')
+  doc_ok=$(grep -c 'no third source' templates/_common/docs/config.md || true)
+
+  if [[ "$go_src" != "$want" || "$py_src" != "$want" ]]; then
+    fail "ordered config sources" "both languages must report exactly: $want
+  go:     ${go_src:-<not reported>}
+  python: ${py_src:-<not reported>}"
+  elif [[ "$doc_ok" == "0" ]]; then
+    fail "ordered config sources" "both languages report '$want', but docs/config.md no longer states
+that there is no third source. The document and the code must agree."
+  else
+    pass "config sources are exactly [$want] in both, and docs/config.md agrees"
+  fi
+else
+  fail "\`make config\` output" "one or both services were not generated (see above)"
+  fail "ordered config sources" "one or both services were not generated (see above)"
 fi
 
 # --- summary ---------------------------------------------------------------

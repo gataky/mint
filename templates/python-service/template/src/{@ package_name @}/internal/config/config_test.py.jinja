@@ -27,7 +27,7 @@ from {@ package_name @}.internal.config import (
     source_names,
 )
 from {@ package_name @}.internal.config.config import Section, check_keys, fields
-from {@ package_name @}.internal.config.source import OTLP_KEY, key_for
+from {@ package_name @}.internal.config.source import OTLP_KEY, MappingSource, key_for
 
 
 def write_config(tmp_path: Path, files: dict[str, str]) -> Path:
@@ -60,7 +60,7 @@ def test_settings_actually_uses_those_two_sources(tmp_path: Path) -> None:
     # source_names() reports what build_sources returns; THIS asserts what
     # pydantic is actually handed. Deleting settings_customise_sources would
     # restore init/env/dotenv/file-secret and leave source_names() lying.
-    nothing = cast("PydanticBaseSettingsSource", None)
+    nothing = cast(PydanticBaseSettingsSource, None)
     customised = Settings.settings_customise_sources(
         Settings,
         init_settings=nothing,
@@ -70,7 +70,9 @@ def test_settings_actually_uses_those_two_sources(tmp_path: Path) -> None:
     )
 
     # pydantic wants highest precedence first; docs/config.md lists lowest first.
-    assert [source.name for source in reversed(customised)] == ["yaml", "env"]
+    ours = [cast(MappingSource, source) for source in reversed(customised)]
+
+    assert [source.name for source in ours] == ["yaml", "env"]
 
 
 def test_env_file_is_never_configured() -> None:

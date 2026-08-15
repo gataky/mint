@@ -57,7 +57,9 @@ fmt: ## Format all source in place
 	@uv run ruff check --fix-only .
 
 config: ## Print effective configuration, secrets masked
-	@uv run python -m $(PKG) --print-config
+	@# --quiet so uv's venv-creation chatter stays out of the output. This
+	@# target's stdout is configuration; a caller may pipe it to a file.
+	@uv run --quiet python -m $(PKG) --print-config
 
 agents-docs: ## Regenerate openapi.json, llms.txt, and AGENTS.md's command block
 	$(call todo,agents-docs,09)

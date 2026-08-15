@@ -242,7 +242,7 @@ def build_sources(
     settings_cls: type[BaseSettings],
     yaml_values: SourceValues,
     env_values: SourceValues,
-) -> list[PydanticBaseSettingsSource]:
+) -> list[MappingSource]:
     """Return the ordered source list, LOWEST precedence first."""
     return [
         YamlSource(settings_cls, yaml_values),
@@ -275,7 +275,7 @@ def nest(flat: dict[str, str]) -> dict[str, Any]:
         node = out
 
         for part in parents:
-            node = cast("dict[str, Any]", node.setdefault(part, {}))
+            node = cast(dict[str, Any], node.setdefault(part, {}))
 
         node[leaf] = flat[key]
 

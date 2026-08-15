@@ -23,8 +23,8 @@ chunk file and the ADR it cites.
 | 00 | [Bootstrap the mint repo](00-bootstrap.md) | S | — | ✅ done |
 | 01 | [Decisions and ADRs](01-decisions.md) — research, no code | M | 00 | ✅ done — 11 ADRs, all approved |
 | 02 | [Copier scaffolding + harness skeleton](02-copier-scaffolding.md) | L | 01 | ✅ done — acceptance green, checkpoint cleared |
-| 03 | [Configuration](03-config.md) | M | 02 | next |
-| 04 | [Logging](04-logging.md) | M | 03 | |
+| 03 | [Configuration](03-config.md) | M | 02 | ✅ done |
+| 04 | [Logging](04-logging.md) | M | 03 | next |
 | 05 | [Error contract](05-error-contract.md) | S | 03 | |
 | 06 | [HTTP server, middleware, lifecycle, health](06-http-server.md) | L | 04, 05 | |
 | 07 | [Operation registry + widgets example](07-registry-and-widgets.md) | L | 06 | |

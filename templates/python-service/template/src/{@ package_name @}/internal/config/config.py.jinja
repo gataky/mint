@@ -199,7 +199,7 @@ def _not_empty(value: str) -> str:
 
 def _port_range(value: int) -> int:
     """Reject ports outside the unprivileged range."""
-    if value < 1024 or value > 65535:  # noqa: PLR2004  # the range IS the rule
+    if value < 1024 or value > 65535:  # the range IS the rule
         raise RuleError(str(value), f"{VALUE} is not a port between 1024 and 65535")
     return value
 
@@ -222,6 +222,7 @@ def _prometheus_name(value: str) -> str:
 
 
 NonEmpty = Annotated[str, AfterValidator(_not_empty)]
+PromNamespace = Annotated[str, AfterValidator(_prometheus_name)]
 Port = Annotated[int, BeforeValidator(_to_int), AfterValidator(_port_range)]
 Timeout = Annotated[Duration, BeforeValidator(_to_duration), AfterValidator(_not_negative)]
 SecretValue = Annotated[Secret, BeforeValidator(_to_secret)]
@@ -298,9 +299,7 @@ class TracingSettings(Section):
 class MetricsSettings(Section):
     """The namespace every metric this service exports is prefixed with."""
 
-    namespace: Annotated[str, AfterValidator(_prometheus_name)] = (
-        "{@ service_name | replace('-', '_') @}"
-    )
+    namespace: PromNamespace = "{@ service_name | replace('-', '_') @}"
 
 
 class ObservabilitySettings(Section):
@@ -393,7 +392,7 @@ class Settings(BaseSettings):
         """Return the effective configuration with secrets masked."""
         # Imported here, not at module scope: render.py imports this module,
         # and Python has no way to express Go's "one package, several files".
-        from .render import render  # noqa: PLC0415
+        from .render import render
 
         return render(self)
 
@@ -546,9 +545,9 @@ def multi_error(errors: list[FieldError]) -> ConfigError:
 class _Context:
     """The sources prepared for the Settings currently being constructed."""
 
-    yaml: "SourceValues"
-    env: "SourceValues"
-    sources: tuple["MappingSource", ...] = ()
+    yaml: SourceValues
+    env: SourceValues
+    sources: tuple[MappingSource, ...] = ()
 
 
 _CTX: ContextVar[_Context | None] = ContextVar("mint_config_context", default=None)
@@ -569,7 +568,7 @@ def prepare(config_dir: Path) -> _Context:
     # Imported here, not at module scope: source.py imports this module for
     # FieldError and the naming rule, and Python has no way to express Go's
     # "one package, several files".
-    from .source import build_sources, read_env, read_yaml  # noqa: PLC0415
+    from .source import build_sources, read_env, read_yaml
 
     known = {f.path for f in fields()}
     yaml_values = read_yaml(config_dir, known)
@@ -614,7 +613,7 @@ def load(config_dir: str | Path = "config") -> Settings:
     if settings is None:  # pragma: no cover — unreachable; validation succeeded
         raise ConfigError("config: no settings and no errors")
 
-    settings._origins = _origins(found, ctx)  # noqa: SLF001  # its own private attribute
+    settings._origins = _origins(found, ctx)  # its own private attribute
 
     return settings
 
@@ -667,8 +666,8 @@ def default() -> Settings:
         _CTX.reset(token)
 
 
-def _empty() -> "SourceValues":
+def _empty() -> SourceValues:
     """Return an empty source result."""
-    from .source import SourceValues  # noqa: PLC0415
+    from .source import SourceValues
 
     return SourceValues()
