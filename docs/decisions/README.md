@@ -43,3 +43,14 @@ an ADR disagree, the spec is stale.
 | [0009](0009-repo-wide-semver-tags.md) | Plain repo-wide semver, not per-template tags | **yes** — per-template `copier.yml` cannot work at all |
 | [0010](0010-use-structlog-for-python-logging.md) | structlog for Python, boot uvicorn through it | **yes** — `slog.NewTextHandler` emits no color |
 | [0011](0011-pinned-toolchain-versions.md) | Pin exact toolchain versions | no — but two pins were already stale security releases |
+
+Three follow-ups closed gaps that only became visible once the eleven were
+read together. Writing ADRs in parallel is fast and buys independence, but it
+cannot see across itself — each of these is a seam between two decisions that
+neither one owned.
+
+| # | decision | seam it closes |
+| --- | --- | --- |
+| [0012](0012-pin-lmittmann-tint-for-go-console-logging.md) | Pin `lmittmann/tint` v1.2.0 for Go tier-1 colour | 0010 approved a colour dependency; 0011's pin table had no row for one |
+| [0013](0013-govern-the-downgraded-openapi-document.md) | Govern the 3.0.3 downgrade under 0007's rules | 0007 named two generated files; 0001 later required a third |
+| [0014](0014-python-entrypoint-owns-its-servers-and-signals.md) | The Python root builds its own Servers and owns signals | 0010 requires `uvicorn.run(...)`; 0008 requires two Servers — `run()` cannot do both |
