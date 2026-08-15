@@ -1,0 +1,42 @@
+# Default configuration, checked in.
+#
+# Every value here can be overridden by an environment variable named MINT_ +
+# the config path upper-cased, with "__" between levels:
+#
+#   server.read_timeout  ->  MINT_SERVER__READ_TIMEOUT
+#   logging.format       ->  MINT_LOGGING__FORMAT
+#
+# For local-only overrides, copy config.local.yaml.example to
+# config/config.local.yaml — it is gitignored and takes precedence over this
+# file, but still loses to the environment.
+#
+# Run `make config` to see the effective values and where each one came from.
+
+env: local
+
+service:
+  name: widget-svc
+  version: 0.1.0
+  owner: unowned
+
+server:
+  port: 8080
+  # Health checks and, later, /metrics. Set equal to `port` to collapse both
+  # onto a single listener.
+  admin_port: 9080
+
+  read_header_timeout: 5s
+  read_timeout: 15s
+  write_timeout: 15s
+  idle_timeout: 60s
+
+  # Per-request context deadline handlers work against.
+  request_timeout: 10s
+  # How long the drain may take on SIGTERM before shutdown is called a failure.
+  shutdown_timeout: 15s
+
+logging:
+  # debug | info | warn | error
+  level: info
+  # console (colorized, for a human) | json (one object per line)
+  format: console

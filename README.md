@@ -1,61 +1,148 @@
 # Mint
 
-Generate microservices in Go or Python from one consistent set of
-[Copier](https://copier.readthedocs.io/) templates — "minting" a new service.
+Two reference microservices — one Go, one Python — that expose the **same API**
+and the **same Makefile**. A client cannot tell which one it is talking to; a
+developer moving between them does not have to relearn anything.
 
-Run one command, answer a few prompts, get a working service. Once you're
-inside a generated repo, building, running, and testing it should feel
-identical regardless of which language it is: same Makefile targets, same
-three-layer architecture, same log schema, same config precedence.
+Once these are right, they become [Copier](https://copier.readthedocs.io/)
+templates for minting new services. **That step has not been taken yet** — see
+[Where this is going](#where-this-is-going).
 
-> **Status: Phase 1, in progress.** The templates aren't usable yet. See
-> [`tasks/README.md`](tasks/README.md) for the implementation plan and what's
-> done so far.
+```
+mint/
+├── go-service/       Go 1.26 · net/http · huma · koanf · slog + tint
+├── python-service/   Python 3.14 · FastAPI · uvicorn · pydantic-settings · loguru
+└── scripts/compare.sh
+```
 
-## Documentation
+## Quick start
 
-| | |
+```sh
+make -C go-service run          # :8080, admin :9080
+make -C python-service run      # same ports — run one at a time
+```
+
+Both default to the same ports on purpose: they are the same service. To run
+them side by side, override one:
+
+```sh
+MINT_SERVER__PORT=8081 MINT_SERVER__ADMIN_PORT=9081 make -C python-service run
+```
+
+## Commands
+
+Every target below exists in **both** services with the same name and the same
+behavior:
+
+| target | what it does |
 | --- | --- |
-| **What Mint must be** | [`prompt.md`](prompt.md) — the specification |
-| **How it gets built** | [`tasks/README.md`](tasks/README.md) — ordered chunks |
-| **Why it's built that way** | [`docs/decisions/`](docs/decisions/README.md) — ADRs |
-| **Working on this repo** | [`AGENTS.md`](AGENTS.md) |
+| `run` | boots the service |
+| `build` | produces the runnable artifact |
+| `test` | unit tests with a coverage summary |
+| `test-integration` | the tagged/marked tests |
+| `lint` | linter + type check + the "no env vars outside config" check |
+| `fmt` | formats in place |
+| `config` | prints the effective config and where each value came from |
+| `clean` | removes build artifacts |
+| `help` | self-documents by parsing `##` comments |
 
-Shared source-of-truth docs, inherited by every generated service:
-[architecture](docs/architecture.md) · [logging](docs/logging.md) ·
-[config](docs/config.md) · [testing](docs/testing.md) ·
-[agents](docs/agents.md)
+From the repo root, `make test`, `make lint`, `make fmt` and `make build` fan
+out to both.
 
-## Developer machine setup
+```sh
+make compare   # boots both and diffs what they return, request by request
+```
 
-_Filled in by chunk 10 — this is the one place asdf, direnv, and copier
-installation is documented, so generated services can link here instead of
-repeating it._
+## What is guaranteed to match
 
-## Generating a service
+Only the things something outside the service consumes:
 
-_Chunk 10._
+- **The API** — route templates, methods, status codes, and response bodies.
+- **The error contract** — RFC 9457 `application/problem+json`, with `type`,
+  `title`, `status`, `detail` and `instance` on every error.
+- **Log field names** in both tiers, and the level vocabulary
+  (`debug`/`info`/`warn`/`error` — Python's `warning` and `critical` are
+  normalized).
+- **Config precedence and environment variable names.**
+- **The Makefile target list.**
 
-## Updating an existing service
+## What deliberately does not match
 
-_Chunk 10 — `copier update` is the whole reason Mint uses Copier rather than
-cookiecutter, and it gets documented from an observed run, not from the
-Copier docs._
+Internal layout, error message wording, JSON key order, test names, and module
+structure. Each language does what is idiomatic for it:
 
-## Changing a template
+- Go gets `cmd/` and `internal/` with a `transport/service` split, because that
+  is Go's convention.
+- Python gets a flat `src/widget_svc/` package with an `api/` subpackage,
+  because that is Python's.
 
-_Chunk 10 — including the rule that a copier question added to one language
-must be added to both, and the versioning/tagging policy._
+Writing Python that looks like Go produces bad Python. The contract is the API,
+not the file tree.
 
-## Roadmap
+## Configuration
 
-**Phase 1** (current): app code, config, logging, errors, HTTP transport,
-health, lifecycle, tracing, metrics, generated discovery docs, tests,
-Makefile, asdf, direnv.
+Precedence, lowest to highest, identical in both:
 
-**Phase 2**: Dockerfiles, docker-compose, CI pipelines.
+```
+defaults in code  <  config/config.yaml  <  config/config.local.yaml  <  environment
+```
 
-**Phase 3**: Kubernetes manifests.
+Environment variables are `MINT_` + the config path upper-cased, with `__`
+between levels and the key's own underscores preserved:
 
-Deferred with seams left in place: MCP servers, authentication. See the
-deferral table in [`prompt.md`](prompt.md) § Scope.
+```
+server.read_timeout  ->  MINT_SERVER__READ_TIMEOUT
+logging.format       ->  MINT_LOGGING__FORMAT
+```
+
+Two decisions worth keeping:
+
+- **`__`, not `_`, between levels.** Single-underscore nesting cannot
+  distinguish `server.read_timeout` from `server.read.timeout`.
+- **A constant `MINT_` prefix, not the service name.** Kubernetes injects
+  `{SVCNAME}_PORT` into every pod, so `WIDGET_SVC_PORT` would arrive as
+  `tcp://10.0.162.149:8080`.
+
+`make config` prints the effective configuration and names the source of every
+value. Its output is identical between the two services.
+
+## One-time machine setup
+
+```sh
+brew install asdf direnv          # or your platform's equivalent
+asdf plugin add golang && asdf plugin add python && asdf plugin add uv
+asdf install                      # reads .tool-versions
+```
+
+Add direnv's hook to your shell, then `direnv allow` in each service directory.
+
+## Where this is going
+
+**Built:** config, two log tiers, the error contract, the HTTP transport, health
+endpoints, graceful shutdown, OpenAPI 3.1 with Swagger UI, tests, Makefiles,
+asdf and direnv.
+
+**Next, in rough order:**
+
+1. **Metrics** — `http_server_requests_total`, `_request_duration_seconds` and
+   `_active_requests` on the admin port. Purely additive: one middleware and one
+   route. The access log already records the route *template*, so the label
+   cardinality problem is already solved.
+2. **OpenTelemetry tracing** — `trace_id` and `span_id` join every log line.
+   The seams are in: Go threads `ctx` through every service method and reaches
+   the logger through it; Python's handlers are `async` and its request fields
+   ride on contextvars, which is the same mechanism OTel uses.
+3. **A conformance test** — `scripts/compare.sh` is a script you read the output
+   of, not a test suite. Promoting it to something that runs in CI is a
+   deliberate later step.
+4. **Copier templates** — parameterize `service_name`, `module_path` /
+   `package_name`, ports and owner, and move both trees under `templates/`.
+
+**Deliberately not built:** authentication (expected at a gateway; the
+middleware chain has a named empty slot and both services warn at startup when
+`env != local`), Dockerfiles, CI, and Kubernetes manifests.
+
+A longer specification with more of the reasoning — including findings that are
+still worth reading — is in `prompt.md`. It describes a considerably more
+elaborate system than this one; where the two disagree, this repo is what was
+actually built and the spec is aspirational.

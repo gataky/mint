@@ -1,40 +1,42 @@
-# Mint — template source repo.
-# These are MINT'S OWN targets. The targets a *generated service* must expose
-# are specified in prompt.md § Makefile parity and are a different list.
+# Mint — the top level. These targets fan out to both services.
+#
+# The per-service targets are the real interface; see go-service/Makefile and
+# python-service/Makefile. Every target below exists in both.
 
 .DEFAULT_GOAL := help
 SHELL := /usr/bin/env bash
 
-# Stub helper: fail loudly and name the chunk that implements the target,
-# so an unimplemented target is never mistaken for a passing one.
-define todo
-	@printf '\033[33mmake %s\033[0m is not implemented yet — see tasks/%s\n' "$(1)" "$(2)"
-	@exit 1
-endef
+SERVICES := go-service python-service
 
-.PHONY: help parity verify test lint fmt clean
+.PHONY: help test lint fmt build clean compare run-go run-python
 
 help: ## Show this help
-	@printf '\nMint — microservice template generator\n\n'
+	@printf '\n\033[1mMint\033[0m — one API, two languages\n\n'
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
-	@printf '\nSpec: prompt.md   Implementation chunks: tasks/README.md\n\n'
+	@printf '\nEach service has the same targets:\n'
+	@printf '  make -C go-service help\n  make -C python-service help\n\n'
 
-parity: ## Check Go and Python templates for drift
-	@./scripts/parity.sh
+test: ## Run both services' tests
+	@$(foreach s,$(SERVICES),printf '\n\033[1m== $(s) ==\033[0m\n' && $(MAKE) --no-print-directory -C $(s) test &&) true
 
-verify: ## Generate both templates, build, boot, assert, tear down
-	@./scripts/verify-template.sh
+lint: ## Lint both services
+	@$(foreach s,$(SERVICES),printf '\n\033[1m== $(s) ==\033[0m\n' && $(MAKE) --no-print-directory -C $(s) lint &&) true
 
-test: ## Run mint's own tests
-	$(call todo,test,02-copier-scaffolding.md)
+fmt: ## Format both services
+	@$(foreach s,$(SERVICES),printf '\n\033[1m== $(s) ==\033[0m\n' && $(MAKE) --no-print-directory -C $(s) fmt &&) true
 
-lint: ## Lint mint's own scripts and templates
-	$(call todo,lint,02-copier-scaffolding.md)
+build: ## Build both services
+	@$(foreach s,$(SERVICES),printf '\n\033[1m== $(s) ==\033[0m\n' && $(MAKE) --no-print-directory -C $(s) build &&) true
 
-fmt: ## Format mint's own scripts and templates
-	$(call todo,fmt,02-copier-scaffolding.md)
+clean: ## Clean both services
+	@$(foreach s,$(SERVICES),$(MAKE) --no-print-directory -C $(s) clean &&) true
 
-clean: ## Remove harness scratch directories
-	@rm -rf .mint-tmp
-	@echo "cleaned"
+compare: ## Boot both services and diff what they return
+	@./scripts/compare.sh
+
+run-go: ## Boot the Go service
+	@$(MAKE) --no-print-directory -C go-service run
+
+run-python: ## Boot the Python service
+	@$(MAKE) --no-print-directory -C python-service run
