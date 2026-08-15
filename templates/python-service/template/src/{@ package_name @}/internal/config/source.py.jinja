@@ -1,0 +1,282 @@
+"""The ordered source list, and the only read of `os.environ` in this service.
+
+This module is the whole of ADR 0006's seam: a third source would be one class
+here and one insertion at the right index in `build_sources`. No caller
+changes, and precedence is expressed nowhere else.
+
+There are exactly two sources on purpose. An unused code path in a template is
+worse than no path — every generated service inherits its maintenance cost, in
+two languages, forever.
+"""
+
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, ClassVar, cast
+
+import yaml
+from pydantic.fields import FieldInfo
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
+
+from .config import ENV_DELIM, ENV_PREFIX, FieldError, Settings, env_name
+
+# The one config key with a foreign fallback chain. See docs/config.md: Mint
+# defers to OpenTelemetry for how to reach a backend and owns who this service
+# is.
+OTLP_KEY = "observability.tracing.otlp_endpoint"
+
+# The enumerated, closed list of variables Mint does not own but does read,
+# highest precedence first. They are read HERE so that the lint rule still
+# holds and `make config` can still tell the truth about which one won.
+OTLP_FALLBACK = (
+    "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_ENDPOINT",
+)
+
+_NULL_TAG = "tag:yaml.org,2002:null"
+
+
+@dataclass
+class SourceValues:
+    """What one source produced: raw scalars, where each came from, what broke.
+
+    Values are keyed by config key path (`server.timeouts.read_header`) and
+    are raw text. Parsing and validation belong to the model, so that every
+    source's bad input produces the same message.
+    """
+
+    values: dict[str, str] = field(default_factory=dict)
+    origins: dict[str, str] = field(default_factory=dict)
+    errors: list[FieldError] = field(default_factory=list)
+
+
+# --- YAML ------------------------------------------------------------------
+
+
+def read_yaml(config_dir: Path, known: set[str]) -> SourceValues:
+    """Read config.yaml and overlay config.local.yaml.
+
+    They are ONE source: the local file is a machine-specific overlay of the
+    committed defaults, not a third place precedence has to be explained.
+
+    A missing file is not an error — a service must boot with no config files
+    at all. A key that is not this service's IS an error: this file belongs to
+    this service, so a stray key in it is a typo.
+    """
+    out = SourceValues()
+
+    for path, origin in (
+        (config_dir / "config.yaml", "yaml"),
+        (config_dir / "config.local.yaml", "local yaml"),
+    ):
+        if not path.is_file():
+            continue
+
+        flat: dict[str, str] = {}
+        node = yaml.compose(path.read_text(encoding="utf-8"), Loader=yaml.SafeLoader)
+        _flatten(node, (), flat, str(path), out.errors)
+
+        for key in sorted(flat):
+            if key not in known:
+                out.errors.append(
+                    FieldError(
+                        key=key,
+                        env=env_name(key),
+                        detail=f"unknown config key, set in {path}",
+                    )
+                )
+                continue
+
+            out.values[key] = flat[key]
+            out.origins[key] = origin
+
+    return out
+
+
+def _flatten(
+    node: yaml.Node | None,
+    path: tuple[str, ...],
+    out: dict[str, str],
+    file: str,
+    errors: list[FieldError],
+) -> None:
+    """Walk the YAML document into key-path/scalar pairs.
+
+    Composed into nodes rather than loaded into Python objects so that the raw
+    text is what reaches the parser — `"30s"` stays `30s`, and a value never
+    changes shape on its way through PyYAML's implicit typing. Go's loader
+    walks its own node tree for the same reason.
+    """
+    if node is None:
+        return
+
+    if isinstance(node, yaml.MappingNode):
+        for key_node, value_node in node.value:
+            _flatten(value_node, (*path, str(key_node.value)), out, file, errors)
+        return
+
+    if isinstance(node, yaml.ScalarNode):
+        out[".".join(path)] = "" if node.tag == _NULL_TAG else str(node.value)
+        return
+
+    key = ".".join(path)
+    errors.append(
+        FieldError(
+            key=key,
+            env=env_name(key),
+            detail=f"is not a scalar; configuration values are scalars, set in {file}",
+        )
+    )
+
+
+# --- environment -----------------------------------------------------------
+
+
+def read_env(known: set[str]) -> SourceValues:
+    """Read the environment.
+
+    Presence, not emptiness, is what counts: a variable set to the empty
+    string is present, so `MINT_SERVER__PORT=` is "present and empty" and
+    fails validation rather than falling through to YAML.
+
+    A `MINT_` variable that is not one of this service's keys is IGNORED, not
+    an error: the environment is shared, and the variable may belong to a
+    sibling Mint service.
+    """
+    out = SourceValues()
+
+    spellings: dict[str, list[str]] = {}
+    raw: dict[str, str] = {}
+
+    for name, value in os.environ.items():
+        canonical = name.upper()
+        if not canonical.startswith(ENV_PREFIX):
+            continue
+
+        spellings.setdefault(canonical, [])
+        if name not in spellings[canonical]:
+            spellings[canonical].append(name)
+
+        raw[canonical] = value
+
+    for canonical in sorted(spellings):
+        key = key_for(canonical)
+        names = sorted(spellings[canonical])
+
+        # Matching is case-insensitive, so two spellings are two ways to set
+        # one value and the loader cannot know which was meant. Naming both is
+        # the difference between a startup error and a coin flip.
+        if len(names) > 1:
+            out.errors.append(
+                FieldError(
+                    key=key,
+                    env=canonical,
+                    detail=f"set by {' and '.join(names)}, which normalize to one variable",
+                )
+            )
+            continue
+
+        if key not in known:
+            continue
+
+        out.values[key] = raw[canonical]
+
+    if OTLP_KEY not in out.values and OTLP_KEY in known:
+        for name in OTLP_FALLBACK:
+            if name in os.environ:
+                out.values[OTLP_KEY] = os.environ[name]
+                out.origins[OTLP_KEY] = f"env ({name})"
+                break
+
+    return out
+
+
+def key_for(canonical: str) -> str:
+    """Decode an environment variable name back into its config key.
+
+    The mapping is a bijection, which is what makes this function total.
+    """
+    return canonical.removeprefix(ENV_PREFIX).replace(ENV_DELIM, ".").lower()
+
+
+# --- the sources themselves ------------------------------------------------
+
+
+class MappingSource(PydanticBaseSettingsSource):
+    """A source whose values have already been read.
+
+    Reading happens before the model is constructed so that a source's
+    problems can be collected alongside the model's, and reported in one
+    message instead of the first one to be raised winning.
+    """
+
+    name: ClassVar[str] = "mapping"
+
+    def __init__(self, settings_cls: type[BaseSettings], values: SourceValues) -> None:
+        """Hold the values this source produced."""
+        super().__init__(settings_cls)
+        self.source_values = values
+
+    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
+        """Not used: this source returns whole documents, not fields."""
+        raise NotImplementedError(type(self).__name__)
+
+    def __call__(self) -> dict[str, Any]:
+        """Return the values as the nested document pydantic expects."""
+        return nest(self.source_values.values)
+
+
+class YamlSource(MappingSource):
+    """config/config.yaml with config/config.local.yaml overlaid."""
+
+    name: ClassVar[str] = "yaml"
+
+
+class EnvSource(MappingSource):
+    """The process environment."""
+
+    name: ClassVar[str] = "env"
+
+
+def build_sources(
+    settings_cls: type[BaseSettings],
+    yaml_values: SourceValues,
+    env_values: SourceValues,
+) -> list[PydanticBaseSettingsSource]:
+    """Return the ordered source list, LOWEST precedence first."""
+    return [
+        YamlSource(settings_cls, yaml_values),
+        EnvSource(settings_cls, env_values),
+    ]
+
+
+def source_names() -> list[str]:
+    """Return the ordered source list by name, lowest precedence first.
+
+    Derived from `build_sources` itself rather than written down twice, so a
+    source added without being named here is impossible.
+
+    docs/config.md documents this list, a test asserts it is exactly
+    ["yaml", "env"], and mint's `make parity` diffs it against the Go
+    template's. That is what turns a silently reintroduced `dotenv_settings`
+    into a build failure instead of a production surprise.
+    """
+    empty = SourceValues()
+
+    return [source.name for source in build_sources(Settings, empty, empty)]
+
+
+def nest(flat: dict[str, str]) -> dict[str, Any]:
+    """Expand flat key paths into the nested document pydantic validates."""
+    out: dict[str, Any] = {}
+
+    for key in sorted(flat):
+        *parents, leaf = key.split(".")
+        node = out
+
+        for part in parents:
+            node = cast("dict[str, Any]", node.setdefault(part, {}))
+
+        node[leaf] = flat[key]
+
+    return out

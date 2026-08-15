@@ -79,7 +79,7 @@ mint/
 ├── templates/
 │   ├── _common/             # language-agnostic files, reached by relative symlink
 │   │   └── docs/
-│   ├── go-service/template/         # [[ ]]-parameterized Go source tree
+│   ├── go-service/template/         # {@ @}-parameterized Go source tree
 │   │   └── docs -> ../../_common/docs
 │   └── python-service/template/     # ...and Python
 │       └── docs -> ../../_common/docs
@@ -125,16 +125,19 @@ Multi-document YAML with a rendered `_subdirectory` and a document-level
 
 ```yaml
 ---
-_subdirectory: "templates/[[ language ]]-service/template"
-_min_copier_version: "9.17.0"
+_subdirectory: "templates/{@ language @}-service/template"
+_min_copier_version: "9.17.1"
+_envops:
+  variable_start_string: "{@"
+  variable_end_string: "@}"
 language: {type: str, choices: {Go: go, Python: python}, default: go}
 ---
 !include "questions-shared.yml"
 ---
 module_path:
-  when: "[[ language == 'go' ]]"
+  when: "{@ language == 'go' @}"
 package_name:
-  when: "[[ language == 'python' ]]"
+  when: "{@ language == 'python' @}"
 ```
 
 `!include` must be its own YAML document — used as a mapping entry it fails
@@ -149,7 +152,7 @@ with `InvalidConfigFileError`.
 | `service_description` | str | one line; README and OpenAPI `info.description` |
 | `service_owner` | str | team name — AGENTS.md, `target_info`, and Phase 2/3's CODEOWNERS |
 | `repo_url` | str | e.g. `github.com/<org>/<service_name>` |
-| `module_path` | str | Go only (`when:`-gated). Defaults to `[[ repo_url ]]`. |
+| `module_path` | str | Go only (`when:`-gated). Defaults to `{@ repo_url @}`. |
 | `package_name` | str | Python only (`when:`-gated). Defaults to `service_name` with `-`→`_`. |
 | `port` | int | 1024–65535 |
 | `admin_port` | int | `/metrics`, `/healthz`, `/readyz`. Defaults to `port + 1000`. |
@@ -157,18 +160,28 @@ with `InvalidConfigFileError`.
 Every question needs a `help` string, a validator where a bad answer would
 produce code that doesn't compile, and a default where derivable.
 
-**Jinja delimiters are `[[ ]]` / `[% %]` / `[# #]`.** Phase 2 brings GitHub
-Actions and its `${{ }}` would collide.
+**The variable delimiter is `{@ @}`. Blocks and comments stay on Jinja's
+defaults, `{% %}` and `{# #}`.** Only `{{` was ever contested; `{%` and `{#`
+collide with nothing in this stack.
 
-**`[[ ]]` has one live collision of its own: TOML's array-of-tables syntax
-is also `[[name]]`.** In a verbatim file this is harmless — `uv.lock` ships
-31 `[[package]]` lines and Copier never renders it. In a `.jinja` file it is
-silent data loss: Jinja parses `[[tool.mypy.overrides]]` as an undefined
-variable, renders an empty string, and leaves behind TOML that is still
-syntactically valid with the section simply gone. Nothing fails.
+Getting here took two attempts, and the reasoning is worth keeping because
+the same trap is available in Phase 2.
 
-The distinguishing feature is the space — Mint always writes `[[ name ]]`,
-TOML never does — and `make parity` asserts on it in both directions.
+`{{ }}` is unusable: Helm (Phase 3) and GitHub Actions' `${{ }}` (Phase 2)
+both use it heavily, in files we know we will write.
+
+`[[ ]]` was the first replacement and was worse. It collides with three
+things that exist **now**: Python's `Callable[[str], str]` — which is simply
+how a callback is annotated, and which broke chunk 03's config package
+outright — plus TOML's `[[table]]` (`uv.lock` ships 31 `[[package]]` lines)
+and bash's `[[ test ]]`, which lives in every Makefile and `.envrc`. It was
+chosen to dodge two *hypothetical future* collisions and bought three
+*present* ones.
+
+The lesson generalizes: **weigh a delimiter against the languages the
+templates are written in, not only against the ones they will later
+generate.** The migration cost ~60 files and was cheap only because it
+happened in chunk 03; in chunk 09 it would not have been.
 
 **`_tasks`**: `git init`, then `go mod tidy` / `uv sync`, then a printed
 next-steps block ending with `direnv allow` and `make run`.

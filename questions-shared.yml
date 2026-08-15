@@ -16,11 +16,11 @@ service_name:
     object name, so it must be a valid DNS label.
   default: my-service
   validator: >-
-    [% if not (service_name | regex_search('^[a-z][a-z0-9-]{1,38}[a-z0-9]$')) %]
+    {% if not (service_name | regex_search('^[a-z][a-z0-9-]{1,38}[a-z0-9]$')) %}
     service_name must be kebab-case and DNS-label-safe: lowercase letters,
     digits and hyphens, starting with a letter, ending alphanumeric, 3-40
-    characters. Got: [[ service_name ]]
-    [% endif %]
+    characters. Got: {@ service_name @}
+    {% endif %}
 
 service_description:
   type: str
@@ -29,9 +29,9 @@ service_description:
     write it for someone who has never heard of this service.
   default: A Mint-generated service.
   validator: >-
-    [% if not service_description.strip() %]
+    {% if not service_description.strip() %}
     service_description must not be empty — it is the OpenAPI description.
-    [% endif %]
+    {% endif %}
 
 service_owner:
   type: str
@@ -39,30 +39,30 @@ service_owner:
     The team that owns this service. Feeds AGENTS.md, the Prometheus
     target_info series, and Phase 2/3's CODEOWNERS and k8s annotations.
   validator: >-
-    [% if not service_owner.strip() %]
+    {% if not service_owner.strip() %}
     service_owner must not be empty — an unowned service is an incident
     waiting for a maintainer.
-    [% endif %]
+    {% endif %}
 
 repo_url:
   type: str
   help: "Where this service's repo will live, e.g. github.com/acme/widget-svc"
-  default: "github.com/acme/[[ service_name ]]"
+  default: "github.com/acme/{@ service_name @}"
   validator: >-
-    [% if not (repo_url | regex_search('^[a-z0-9.-]+\.[a-z]{2,}/[A-Za-z0-9._~/-]+$')) %]
+    {% if not (repo_url | regex_search('^[a-z0-9.-]+\.[a-z]{2,}/[A-Za-z0-9._~/-]+$')) %}
     repo_url must be a host and path, without a scheme,
-    e.g. github.com/acme/widget-svc. Got: [[ repo_url ]]
-    [% endif %]
+    e.g. github.com/acme/widget-svc. Got: {@ repo_url @}
+    {% endif %}
 
 port:
   type: int
   help: "Port for the HTTP API."
   default: 8080
   validator: >-
-    [% if port < 1024 or port > 65535 %]
+    {% if port < 1024 or port > 65535 %}
     port must be between 1024 and 65535 (ports below 1024 need root).
-    Got: [[ port ]]
-    [% endif %]
+    Got: {@ port @}
+    {% endif %}
 
 admin_port:
   type: int
@@ -77,10 +77,10 @@ admin_port:
     Keeping /metrics private is NetworkPolicy's job. What the split actually
     buys is that readiness and metrics stay answerable while the API
     listener is draining.
-  default: "[[ port + 1000 if port <= 64535 else port ]]"
+  default: "{@ port + 1000 if port <= 64535 else port @}"
   validator: >-
-    [% if admin_port < 1024 or admin_port > 65535 %]
-    admin_port must be between 1024 and 65535. Got: [[ admin_port ]].
+    {% if admin_port < 1024 or admin_port > 65535 %}
+    admin_port must be between 1024 and 65535. Got: {@ admin_port @}.
     Note that port + 1000 exceeds 65535 when port > 64535; set admin_port
     explicitly, or set it equal to port to use a single listener.
-    [% endif %]
+    {% endif %}

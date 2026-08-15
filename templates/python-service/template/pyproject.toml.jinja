@@ -1,7 +1,7 @@
 [project]
-name = "[[ service_name ]]"
+name = "{@ service_name @}"
 version = "0.1.0"
-description = "[[ service_description ]]"
+description = "{@ service_description @}"
 readme = "README.md"
 # Pinned to a single CPython minor series on purpose. uv.lock resolves against
 # this, so moving off 3.14 means re-resolving and re-verifying the whole
@@ -12,6 +12,11 @@ dependencies = [
     # same toolchain, or the mint mark in README.md stops identifying a build.
     # uv.lock pins the transitive set the same way, and is committed.
     "fastapi==0.141.1",
+    # internal/config. pydantic-settings is forced down to exactly two
+    # sources — see settings_customise_sources — and PyYAML reads the one
+    # file those two sources need. There is no YAML parser in the stdlib.
+    "pydantic-settings==2.15.0",
+    "pyyaml==6.0.3",
     "uvicorn==0.52.3",
 ]
 
@@ -24,7 +29,12 @@ dev = [
     "mypy==2.3.0",
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
+    # `make test` says "with coverage" in both languages; Go has it built in.
+    "pytest-cov==7.1.0",
     "ruff==0.16.3",
+    # PyYAML ships no py.typed, and mypy --strict will not read it without
+    # stubs. Pinned like everything else.
+    "types-pyyaml==6.0.12.20260815",
 ]
 
 [build-system]
@@ -32,7 +42,7 @@ requires = ["hatchling==1.32.0"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/[[ package_name ]]"]
+packages = ["src/{@ package_name @}"]
 
 # --- ruff -------------------------------------------------------------------
 
@@ -67,6 +77,24 @@ select = [
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+# Tests live next to the code they test, the way Go's do, so that `make
+# parity` can diff the two languages' file trees. They get the rules that
+# make sense for tests and not the ones that do not.
+"*_test.py" = [
+    "S101", # assert IS the test
+    "D103", # a test name is its documentation
+]
+
+# --- pytest -----------------------------------------------------------------
+
+[tool.pytest.ini_options]
+# `*_test.py`, not `test_*.py`: Go's convention, so that the two languages'
+# file trees match name for name. Both are pytest defaults.
+python_files = ["*_test.py"]
+testpaths = ["src"]
+addopts = "--strict-markers --strict-config"
 
 # --- mypy -------------------------------------------------------------------
 

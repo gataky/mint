@@ -1,0 +1,90 @@
+# Committed configuration defaults for {@ service_name @}.
+#
+# This is the LOWEST-precedence source and the documentation of every key that
+# exists. Environment variables beat everything in here.
+#
+# Every key below has an environment variable, derived from the key path by
+# one rule: MINT_ + the path upper-cased, with __ between levels and the key's
+# own underscores left alone. server.read_timeout is MINT_SERVER__READ_TIMEOUT.
+# There are no aliases: bare ENV, LOG_LEVEL, LOG_FORMAT and PORT are read by
+# nothing here. See docs/config.md.
+#
+# Machine-specific overrides go in config.local.yaml, which is gitignored —
+# copy config.local.yaml.example to start one.
+#
+# NO SECRETS IN THIS FILE, and none in config.local.yaml either. One is
+# committed and both are read by humans. Secrets arrive as environment
+# variables, and a secret-marked field is masked in `make config`.
+
+# local | dev | staging | prod, and nothing else — any other value is a
+# startup error rather than a silent fallback. `local` is what selects the
+# human-readable log tier and the quiet no-op trace exporter.
+env: local
+
+# Who this service is.
+#
+# Single-sourced deliberately: OTEL_SERVICE_NAME and OTEL_RESOURCE_ATTRIBUTES
+# are ignored for these three, so the `service` and `env` fields on a log line
+# can never disagree with the same fields on a span.
+service:
+  name: "{@ service_name @}"
+  version: "0.1.0"
+  owner: "{@ service_owner | replace('\\', '\\\\') | replace('"', '\\"') @}"
+
+# Where and how this service listens. The timeouts are carried here now and
+# applied by the server, which Mint chunk 06 delivers.
+server:
+  # The loopback interface, deliberately. Binding every interface is a
+  # decision someone makes — MINT_SERVER__HOST=0.0.0.0 — not a default nobody
+  # noticed.
+  host: "127.0.0.1"
+  port: {@ port @}
+  # /metrics, /healthz and /readyz. Setting this equal to `port` serves
+  # everything on one listener, which is supported rather than an error.
+  admin_port: {@ admin_port @}
+  # Durations use Go's syntax in BOTH languages: 30s, 1m30s, 250ms. The
+  # Python service parses and prints them identically; that is a parity check,
+  # not a coincidence.
+  #
+  # The deadline for reading a whole request, headers and body.
+  read_timeout: "30s"
+  timeouts:
+    # Just the request line and the headers. A server with no header deadline
+    # holds a connection open forever for a client that never finishes.
+    read_header: "5s"
+    write: "30s"
+    idle: "60s"
+    # How long an in-flight request gets to finish once shutdown starts.
+    shutdown: "15s"
+
+logging:
+  # auto | console | json. `auto` is the console renderer when env is local
+  # and one JSON object per line everywhere else, which is the rule
+  # docs/logging.md states; setting it explicitly overrides that.
+  format: "auto"
+  # debug | info | warn | error. This vocabulary, in both languages.
+  level: "info"
+
+observability:
+  tracing:
+    # Empty means NO exporter — not "export to localhost". The SDK's own
+    # default of localhost:4317 would turn "nothing configured" into a
+    # connection-refused retry storm on every developer's machine.
+    #
+    # When this is empty, OTEL_EXPORTER_OTLP_TRACES_ENDPOINT and then
+    # OTEL_EXPORTER_OTLP_ENDPOINT are consulted — in internal/config, so
+    # `make config` still names which one won.
+    otlp_endpoint: ""
+  metrics:
+    # The prefix on every metric this service exports. Derived from the
+    # service name with hyphens turned into underscores, because a Prometheus
+    # metric name cannot contain a hyphen.
+    namespace: "{@ service_name | replace('-', '_') @}"
+
+database:
+  # Marked secret in the config type, so it is masked in `make config`, in
+  # logs and in error messages — because of the type, not because of the
+  # field's name and not because a call site remembered.
+  #
+  # Set it with MINT_DATABASE__PASSWORD. Never here.
+  password: ""

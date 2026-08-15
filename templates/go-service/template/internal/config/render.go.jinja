@@ -1,0 +1,83 @@
+package config
+
+// `make config` / --print-config. The output format here is byte-identical to
+// the Python template's, and mint's `make parity` diffs the two generated
+// services' output to keep it that way.
+//
+// This is the answer to "why is this value X". It names the winning source
+// for every key, which is why there are exactly two sources and why no flag
+// sets a value: with a third unnamed input this output would be a guess.
+
+import (
+	"fmt"
+	"reflect"
+	"strconv"
+	"strings"
+)
+
+// Column widths. Fixed rather than computed from the longest key, so that
+// adding a long key does not reflow every line and turn a one-key change into
+// a whole-file diff.
+const (
+	keyWidth   = 38
+	valueWidth = 30
+)
+
+// Render returns the effective configuration with secrets masked, annotating
+// every key with the source that won.
+//
+// The annotation names the VARIABLE, not just "env", for a value that came
+// through the OpenTelemetry fallback chain — "env" alone would not tell you
+// that OTEL_EXPORTER_OTLP_ENDPOINT is what you have to change.
+func (c *Config) Render() string {
+	fields := fieldsOf(c)
+
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "%s — effective configuration\n", c.Service.Name)
+	fmt.Fprintf(&b, "sources, lowest precedence first: %s\n\n", strings.Join(SourceNames(), ", "))
+
+	for i := range fields {
+		f := &fields[i]
+
+		origin := c.origins[f.Path]
+		if origin == "" {
+			origin = "default"
+		}
+
+		fmt.Fprintf(&b, "  %-*s %-*s %s\n", keyWidth, f.Path, valueWidth, display(f.value), origin)
+	}
+
+	b.WriteString("\nsecrets are masked; see docs/config.md\n")
+
+	return b.String()
+}
+
+// Origin returns the source that won for a key: default, yaml, local yaml,
+// env, or env naming a foreign variable. It is the same answer `make config`
+// prints, available to a caller that wants one key rather than all of them.
+func (c *Config) Origin(key string) string {
+	if origin, ok := c.origins[key]; ok {
+		return origin
+	}
+
+	return "default"
+}
+
+// display renders one value. Strings are quoted so that "present and empty"
+// is visible as "" rather than as blank space; numbers and durations are not,
+// because they cannot be empty.
+func display(v reflect.Value) string {
+	switch x := v.Interface().(type) {
+	case Secret:
+		return quote(x.String())
+	case Duration:
+		return x.String()
+	case string:
+		return quote(x)
+	case int:
+		return strconv.Itoa(x)
+	default:
+		return quote(fmt.Sprint(v.Interface()))
+	}
+}

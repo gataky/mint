@@ -12,8 +12,8 @@ from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse
 
 app = FastAPI(
-    title="[[ service_name ]]",
-    description="[[ service_description ]]",
+    title="{@ service_name @}",
+    description="{@ service_description @}",
     # FastAPI's own schema endpoints are off. Mint chunk 09 serves
     # /openapi.json and /llms.txt from the operation registry instead — a
     # document derived from route signatures alone validates and lies, and

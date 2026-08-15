@@ -16,6 +16,9 @@
 // Precedence is environment variables over YAML, with deliberately no third
 // source. See docs/config.md.
 //
-// Empty until Mint chunk 03. Until then the listen address is baked into
-// cmd/, which is exactly the drift this package exists to end.
+// The files: config.go is the config type, the reflective walk that derives
+// every environment variable name from it, and the loader; source.go is the
+// ordered source list and the only read of os.Environ in this service;
+// duration.go is the one type whose textual form both languages must agree
+// on; render.go is `make config`.
 package config

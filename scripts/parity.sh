@@ -17,7 +17,7 @@
 #   6  no generated artifacts shipped as template files (ADR 0007)
 #   7  no unrendered template delimiters in generated output
 #   8  the shared docs exist exactly once
-#   9  no TOML array-of-tables colliding with the Jinja delimiters
+#   9  no Jinja default {{ }} syntax, which renders as literal text
 #
 # Four of these (5, 7, 8, 9) exist because something slipped through the
 # others. A check earns its place by having caught something.
@@ -267,14 +267,10 @@ fi
 # — and this check's, because it is cheap here and the trees are already
 # generated.
 
-# The pattern requires a SPACE after `[[`, which is how every Mint template
-# writes a variable (`[[ service_name ]]`). Without that, this check flags
-# TOML's array-of-tables syntax — uv.lock legitimately contains 31 lines of
-# `[[package]]` and is copied verbatim, so it is correct output, not drift.
 unrendered=""
 for d in "$WORK/go" "$WORK/py"; do
   [[ -d "$d" ]] || continue
-  found=$(grep -rlE '\[\[ +[a-zA-Z_]|\[% +[a-z]' "$d" --exclude-dir=.git 2>/dev/null || true)
+  found=$(grep -rlE '\{@ +[a-zA-Z_]|\{% +[a-z]' "$d" --exclude-dir=.git 2>/dev/null || true)
   [[ -n "$found" ]] && unrendered+="${found}"$'\n'
 done
 if [[ -z "${unrendered// }" ]]; then
@@ -315,31 +311,28 @@ it already did once, while both copies called themselves source of truth:
 $dup_docs"
 fi
 
-# --- 9. TOML array-of-tables must not collide with the Jinja delimiters ----
+# --- 9. Nobody reaches for Jinja's default variable syntax -----------------
 #
-# `[[ ]]` was chosen to dodge GitHub Actions' `${{ }}` in Phase 2. It has a
-# live collision TODAY that nobody noticed: TOML's array-of-tables syntax is
-# also `[[name]]`.
+# This replaced a check that guarded TOML's `[[table]]` against the old
+# `[[ ]]` delimiter. That collision no longer exists: the delimiter moved to
+# `{@ @}` after `[[ ]]` turned out to collide with Python's
+# `Callable[[str], str]` — which is simply how a callback is annotated, and
+# cannot be worked around.
 #
-# In a VERBATIM file this is harmless — uv.lock ships 31 `[[package]]` lines
-# and Copier never renders it. In a `.jinja` file it is a silent data-loss
-# bug: Jinja parses `[[tool.mypy.overrides]]` as the variable
-# `tool.mypy.overrides`, finds it undefined, and renders an empty string. The
-# section vanishes and the generated TOML is still syntactically valid, so
-# nothing fails — the config is just quietly gone.
+# The equivalent trap now is muscle memory. `{{ name }}` is what every Jinja
+# tutorial teaches, and in a Mint template it renders as literal text: no
+# error, no warning, the variable just silently fails to interpolate.
 #
-# Nothing hits this today. The check exists so nothing ever does.
+# Checks only the spaced form, since bare `{{` is legitimate in a Helm chart
+# (Phase 3).
 
-# No space after `[[` is what distinguishes TOML's `[[tool.mypy.overrides]]`
-# from Jinja's `[[ service_description ]]`, which legitimately starts lines.
-toml_collision=$(grep -rn '^\[\[[a-zA-Z_]' templates --include='*.jinja' 2>/dev/null || true)
-if [[ -z "$toml_collision" ]]; then
-  pass "no TOML array-of-tables in .jinja files (delimiter collision)"
+default_syntax=$(grep -rn '{{ [a-zA-Z_]' templates --include='*.jinja' 2>/dev/null || true)
+if [[ -z "$default_syntax" ]]; then
+  pass "no Jinja default {{ }} syntax in templates"
 else
-  fail "TOML array-of-tables in a .jinja template" "Jinja will parse these as variables and render them EMPTY, silently
-dropping the section while leaving valid TOML behind. Wrap them in
-[% raw %] ... [% endraw %], or keep the file verbatim (no .jinja suffix):
-$toml_collision"
+  fail "Jinja default {{ }} syntax in a template" "Mint's variable delimiter is {@ @}. These render as literal text with
+no error — the variable simply will not interpolate:
+$default_syntax"
 fi
 
 # --- summary ---------------------------------------------------------------

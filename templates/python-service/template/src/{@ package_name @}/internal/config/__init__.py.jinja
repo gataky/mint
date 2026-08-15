@@ -1,0 +1,67 @@
+"""Loads configuration, and is the ONLY package here that may read an env var.
+
+It loads and validates this service's configuration at startup, and nothing
+else in this service reads an environment variable.
+
+That rule is what makes `make config` able to print the effective
+configuration truthfully. One `os.environ` lookup somewhere else and the
+printed configuration is no longer the configuration the service is running
+on. `make lint` fails on one.
+
+Belongs here: the settings model, its defaults, YAML loading, environment
+overlay, validation at startup, and the masked rendering used by
+`make config`.
+
+Does NOT belong here: anything that *uses* a config value. Configuration is
+read once at startup and passed down as arguments; modules do not reach back
+up for it, and there is no module-level singleton to import.
+
+Precedence is environment variables over YAML, with deliberately no third
+source. See `docs/config.md`.
+
+The files: `config.py` is the settings model, the walk that derives every
+environment variable name from it, and the loader; `source.py` is the ordered
+source list and the only read of `os.environ` in this service; `duration.py`
+is the one type whose textual form both languages must agree on; `render.py`
+is `make config`.
+"""
+
+from .config import (
+    ENV_DELIM,
+    ENV_PREFIX,
+    ENV_VALUES,
+    MASK,
+    ConfigError,
+    Field,
+    FieldError,
+    Secret,
+    Settings,
+    default,
+    env_name,
+    fields,
+    keys,
+    load,
+)
+from .duration import Duration
+from .render import render
+from .source import source_names
+
+__all__ = [
+    "ENV_DELIM",
+    "ENV_PREFIX",
+    "ENV_VALUES",
+    "MASK",
+    "ConfigError",
+    "Duration",
+    "Field",
+    "FieldError",
+    "Secret",
+    "Settings",
+    "default",
+    "env_name",
+    "fields",
+    "keys",
+    "load",
+    "render",
+    "source_names",
+]

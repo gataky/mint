@@ -51,9 +51,12 @@ and an ADR disagree, the spec is stale.
   repo, and `make parity` exists to enforce it.
 - **`templates/_common/` is for files that are genuinely identical.** If a
   file needs a language-specific word in it, it does not belong there.
-  Resist `[% if language == "go" %]`.
-- **Jinja delimiters are `[[ ]]` / `[% %]` / `[# #]`**, not the defaults —
-  Phase 2 brings GitHub Actions and its `${{ }}` would collide.
+  Resist `{% if language == "go" %}`.
+- **The variable delimiter is `{@ @}`**; blocks and comments stay on Jinja's
+  defaults. `{{ }}` collides with Helm and GitHub Actions; `[[ ]]` was tried
+  first and collides with Python's `Callable[[str], str]`, TOML's
+  `[[table]]` and bash's `[[ test ]]`. Typing `{{ name }}` out of habit
+  renders literal text with no error — `make parity` check 9 catches it.
 - **Pin every version.** No floating dependencies, no "latest at generation
   time" resolution — two developers minting a week apart must get identical
   toolchains.

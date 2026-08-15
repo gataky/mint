@@ -2,7 +2,7 @@
 
 The name shadows nothing: absolute imports mean `import logging` elsewhere
 still finds the standard library, and this package is
-`[[ package_name ]].internal.logging`.
+`{@ package_name @}.internal.logging`.
 
 Belongs here: the processor chain that renders the two tiers (a human console
 form for local development, one JSON object per line everywhere else), the

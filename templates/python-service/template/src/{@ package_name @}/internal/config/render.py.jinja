@@ -1,0 +1,65 @@
+"""`make config` / `--print-config`.
+
+The output format here is byte-identical to Mint's Go template's, and mint's
+`make parity` diffs the two generated services' output to keep it that way.
+
+This is the answer to "why is this value X". It names the winning source for
+every key, which is why there are exactly two sources and why no flag sets a
+value: with a third unnamed input this output would be a guess.
+"""
+
+from typing import Final
+
+from .config import Secret, Settings, fields, quote, value_at
+from .duration import Duration
+from .source import source_names
+
+# Column widths. Fixed rather than computed from the longest key, so that
+# adding a long key does not reflow every line and turn a one-key change into
+# a whole-file diff.
+KEY_WIDTH: Final = 38
+VALUE_WIDTH: Final = 30
+
+
+def render(settings: Settings) -> str:
+    """Return the effective configuration with secrets masked.
+
+    Every key is annotated with the source that won. The annotation names the
+    VARIABLE, not just `env`, for a value that came through the OpenTelemetry
+    fallback chain — `env` alone would not tell you that
+    OTEL_EXPORTER_OTLP_ENDPOINT is what you have to change.
+    """
+    lines = [
+        f"{settings.service.name} — effective configuration",
+        f"sources, lowest precedence first: {', '.join(source_names())}",
+        "",
+    ]
+
+    for entry in fields():
+        value = display(value_at(settings, entry.path))
+        lines.append(f"  {entry.path:<{KEY_WIDTH}} {value:<{VALUE_WIDTH}} {settings.origin(entry.path)}")
+
+    lines += ["", "secrets are masked; see docs/config.md", ""]
+
+    return "\n".join(lines)
+
+
+def display(value: object) -> str:
+    """Render one value.
+
+    Strings are quoted so that "present and empty" is visible as `""` rather
+    than as blank space; numbers and durations are not, because they cannot be
+    empty.
+    """
+    if isinstance(value, Secret):
+        return quote(str(value))
+    if isinstance(value, Duration):
+        return str(value)
+    if isinstance(value, bool):
+        return quote(str(value))
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, str):
+        return quote(value)
+
+    return quote(str(value))

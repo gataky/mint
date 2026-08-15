@@ -10,29 +10,41 @@
 
 # --- Document 1: template mechanics + the one question that selects a tree ---
 ---
-_subdirectory: "templates/[[ language ]]-service/template"
+_subdirectory: "templates/{@ language @}-service/template"
 _min_copier_version: "9.17.1"
 
-# Delimiters are NOT Jinja's defaults. Phase 2 brings GitHub Actions, whose
-# ${{ }} collides with {{ }}. Changing this later means touching every
-# template file, so it is fixed before any exist.
+# ONLY the variable delimiter differs from Jinja's defaults, and it took two
+# tries to get right.
+#
+# `{{ }}` is unusable: Helm (Phase 3) and GitHub Actions' `${{ }}` (Phase 2)
+# both use it heavily, in files we know we are going to write.
+#
+# `[[ ]]` was the first replacement and was worse. It collides with things
+# that exist RIGHT NOW: Python's `Callable[[str], str]` — which is simply how
+# you annotate a callback and cannot be avoided — plus TOML's `[[table]]` and
+# bash's `[[ test ]]`. It was chosen to dodge two hypothetical future
+# collisions and bought three present ones.
+#
+# `{@ @}` appears in none of Go, Python, YAML, TOML, Make, bash, Helm or
+# GitHub Actions. Blocks and comments stay on Jinja's defaults because `{%`
+# and `{#` collide with nothing in this stack — only `{{` was ever contested.
 _envops:
-  block_start_string: "[%"
-  block_end_string: "%]"
-  variable_start_string: "[["
-  variable_end_string: "]]"
-  comment_start_string: "[#"
-  comment_end_string: "#]"
+  variable_start_string: "{@"
+  variable_end_string: "@}"
+  block_start_string: "{%"
+  block_end_string: "%}"
+  comment_start_string: "{#"
+  comment_end_string: "#}"
 
 _tasks:
   - command: "git init -q -b main ."
-    when: "[[ not _copier_conf.vcs_ref ]]"
+    when: "{@ not _copier_conf.vcs_ref @}"
   - command: "go mod tidy"
-    when: "[[ language == 'go' ]]"
+    when: "{@ language == 'go' @}"
   - command: "uv sync --quiet"
-    when: "[[ language == 'python' ]]"
+    when: "{@ language == 'python' @}"
   - command: |
-      printf '\n  Minted %s.\n\n  Next:\n    direnv allow\n    make run\n\n  Then: make help\n\n' '[[ service_name ]]'
+      printf '\n  Minted %s.\n\n  Next:\n    direnv allow\n    make run\n\n  Then: make help\n\n' '{@ service_name @}'
 
 language:
   type: str
@@ -57,21 +69,21 @@ language:
 ---
 module_path:
   type: str
-  when: "[[ language == 'go' ]]"
+  when: "{@ language == 'go' @}"
   help: "Go module path. Must match the import path consumers will use."
-  default: "[[ repo_url ]]"
+  default: "{@ repo_url @}"
   validator: >-
-    [% if not (module_path | regex_search('^[a-z0-9][a-z0-9._~-]*(\.[a-z]{2,})?(/[a-zA-Z0-9._~-]+)+$')) %]
+    {% if not (module_path | regex_search('^[a-z0-9][a-z0-9._~-]*(\.[a-z]{2,})?(/[a-zA-Z0-9._~-]+)+$')) %}
     module_path must look like a Go module path, e.g. github.com/acme/widget-svc
-    [% endif %]
+    {% endif %}
 
 package_name:
   type: str
-  when: "[[ language == 'python' ]]"
+  when: "{@ language == 'python' @}"
   help: "Python package name. Importable, so underscores rather than hyphens."
-  default: "[[ service_name | replace('-', '_') ]]"
+  default: "{@ service_name | replace('-', '_') @}"
   validator: >-
-    [% if not (package_name | regex_search('^[a-z][a-z0-9_]*$')) %]
+    {% if not (package_name | regex_search('^[a-z][a-z0-9_]*$')) %}
     package_name must be a valid Python identifier: lowercase, digits and
-    underscores, starting with a letter. Got: [[ package_name ]]
-    [% endif %]
+    underscores, starting with a letter. Got: {@ package_name @}
+    {% endif %}

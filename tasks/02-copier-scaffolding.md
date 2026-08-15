@@ -56,7 +56,7 @@ directories this chunk creates.
 
    ```yaml
    ---
-   _subdirectory: "templates/[[ language ]]-service/template"
+   _subdirectory: "templates/{@ language @}-service/template"
    _min_copier_version: "9.17.1"
    language:
      type: str
@@ -66,9 +66,9 @@ directories this chunk creates.
    !include "questions-shared.yml"
    ---
    module_path:
-     when: "[[ language == 'go' ]]"
+     when: "{@ language == 'go' @}"
    package_name:
-     when: "[[ language == 'python' ]]"
+     when: "{@ language == 'python' @}"
    ```
 
    Four things about this that the spike had to discover:
@@ -110,7 +110,7 @@ directories this chunk creates.
    guarantees the derived Prometheus metric namespace is always a legal
    metric-name prefix (ADR 0003 § 3). Don't weaken it.
 
-5. **Jinja delimiters** — override to `[[ ]]` / `[% %]` / `[# #]`. Do this
+5. **Jinja delimiters** — override to `{@ @}` for variables, Jinja defaults for blocks/comments. Do this
    now; there are no template files yet to migrate. Note that
    `_subdirectory` and the two `when:` expressions use these delimiters too.
 
@@ -273,7 +273,7 @@ Do not tag anything; chunk 10 cuts `v0.1.0`.
 - `port=65000` either clamps the derived `admin_port` default or is rejected
   with a message naming the problem — it does not generate a service that
   fails to bind at boot.
-- No `{{ }}` remains in any template file — delimiters are `[[ ]]`.
+- No `{{ }}` remains in any template file — the variable delimiter is `{@ @}`.
 - No generated file branches on `language`. Grep for it.
 - `.golangci.yml` passes `go tool golangci-lint config verify`; `ruff` runs
   against an explicit `select` list, not its defaults.

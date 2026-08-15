@@ -1,4 +1,4 @@
-# [[ service_name ]] — minted from Mint.
+# {@ service_name @} — minted from Mint.
 #
 # The target names, descriptions, argument shapes and output style in this
 # file are IDENTICAL to the Python template's Makefile by requirement, not by
@@ -9,7 +9,7 @@
 .DEFAULT_GOAL := help
 SHELL := /usr/bin/env bash
 
-BINARY := [[ service_name ]]
+BINARY := {@ service_name @}
 
 # Unimplemented targets fail loudly and name the mint chunk that delivers
 # them. A stub that exits 0 would eventually be mistaken for a passing check.
@@ -25,10 +25,10 @@ help: ## Show this help
 	@# shell string, so it is passed as an ARGUMENT and its quotes escaped.
 	@# An apostrophe in the description ("mint's") otherwise terminates the
 	@# string and `make help` dies with a bash syntax error.
-	@printf '\n%s — %s\n\n' '[[ service_name ]]' '[[ service_description | replace("'", "'\\''") ]]'
+	@printf '\n%s — %s\n\n' '{@ service_name @}' '{@ service_description | replace("'", "'\\''") @}'
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
-	@printf '\nDocs: AGENTS.md · docs/ · http://localhost:[[ port ]]/llms.txt\n\n'
+	@printf '\nDocs: AGENTS.md · docs/ · http://localhost:{@ port @}/llms.txt\n\n'
 
 run: ## Run the service locally
 	@go run ./cmd/$(BINARY)
@@ -39,7 +39,7 @@ build: ## Build the distributable artifact
 	@printf 'built bin/%s\n' "$(BINARY)"
 
 test: ## Run unit tests with coverage
-	$(call todo,test,07)
+	@go test -cover ./...
 
 test-integration: ## Run integration tests (needs external dependencies)
 	$(call todo,test-integration,07)
@@ -53,7 +53,7 @@ fmt: ## Format all source in place
 	@go mod tidy
 
 config: ## Print effective configuration, secrets masked
-	$(call todo,config,03)
+	@go run ./cmd/$(BINARY) --print-config
 
 agents-docs: ## Regenerate openapi.json, llms.txt, and AGENTS.md's command block
 	$(call todo,agents-docs,09)
@@ -71,3 +71,9 @@ check-boundaries:
 	@! grep -rn --include='*.go' '"net/http"' \
 		--exclude-dir=transport --exclude-dir=bin . \
 		|| { printf '\033[31mlayer violation:\033[0m net/http imported outside internal/transport/http\n'; exit 1; }
+	@# internal/config is the ONLY package that may read the environment. One
+	@# read anywhere else and `make config` is printing a configuration the
+	@# service is not actually running on. See docs/config.md.
+	@! grep -rn --include='*.go' -E 'os\.(Getenv|LookupEnv|Environ)' \
+		--exclude-dir=config --exclude-dir=bin . \
+		|| { printf '\033[31mconfig violation:\033[0m the file above reads the environment outside internal/config — see docs/config.md\n'; exit 1; }

@@ -1,0 +1,674 @@
+"""The config MODEL and the loader built on top of it.
+
+The package's own documentation — what belongs in here and what does not — is
+in `__init__.py`, and the user-facing rules are in `docs/config.md`.
+
+Adding a field is one edit: add it to the model. That makes it settable from
+`config/config.yaml`, settable from the environment, and visible in
+`make config`, because all three derive from the same field name. No field
+carries a hand-written environment variable name.
+
+This module and `config.go` in Mint's Go template are the same design, file
+for file. Read them side by side before changing either.
+"""
+
+import re
+from contextvars import ContextVar
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING, Annotated, Any, Final
+
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    GetCoreSchemaHandler,
+    PrivateAttr,
+    ValidationError,
+)
+from pydantic_core import core_schema
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
+
+from .duration import Duration
+
+if TYPE_CHECKING:
+    from .source import MappingSource, SourceValues
+
+# The constant every environment variable this service reads begins with.
+#
+# It is deliberately NOT derived from the service name. Kubernetes already
+# injects {SVCNAME}_PORT=tcp://10.0.162.149:8080 for every Service by default,
+# and this service's name is DNS-label-safe precisely so that it can BE that
+# Service — so a service-derived prefix would read a URL as a port. One
+# constant, so an org forking Mint changes it in one place.
+ENV_PREFIX: Final = "MINT_"
+
+# What separates config key levels inside an environment variable name.
+#
+# A single underscore is never a separator, so a key's own underscores
+# survive: server.read_timeout becomes MINT_SERVER__READ_TIMEOUT. The
+# single-underscore form is not injective — server.read_timeout and
+# server.read.timeout would collide, and the loser would be decided by field
+# declaration order.
+ENV_DELIM: Final = "__"
+
+# What a Secret renders as, everywhere configuration is printed.
+MASK: Final = "********"
+
+# Environments this service may run in. Anything else is a startup error, not
+# a silent fallback to a default.
+ENV_VALUES: Final = ("local", "dev", "staging", "prod")
+
+# Where a rule's message wants the offending value. Going through a
+# placeholder is what lets the renderer mask a secret's value without every
+# rule having to know about secrets.
+VALUE: Final = "\x00value\x00"
+
+
+def quote(text: str) -> str:
+    """Render a value the way both templates render it.
+
+    Wrapped in double quotes with backslashes and quotes escaped, and nothing
+    else. Python's `repr` and Go's `%q` disagree on non-ASCII, so neither is
+    used.
+    """
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+class Secret:
+    """A configuration value that is masked everywhere it is rendered.
+
+    Masking is a property of THIS TYPE, not of the field's name and not of
+    remembering to mask at each call site: `str()` and `repr()` both return
+    the mask. Call `reveal()` for the value, which is the one line a reader
+    can grep for.
+    """
+
+    __slots__ = ("_value",)
+
+    def __init__(self, value: str) -> None:
+        """Wrap a secret value."""
+        self._value = value
+
+    def reveal(self) -> str:
+        """Return the secret's actual value."""
+        return self._value
+
+    def __str__(self) -> str:
+        """Return the mask, never the value."""
+        return MASK if self._value else ""
+
+    def __repr__(self) -> str:
+        """Return the mask, never the value — including in a traceback."""
+        return f"Secret({self.__str__()!r})"
+
+    def __eq__(self, other: object) -> bool:
+        """Compare by value."""
+        if not isinstance(other, Secret):
+            return NotImplemented
+        return self._value == other._value
+
+    def __hash__(self) -> int:
+        """Hash by value, so a Secret can live in a frozen model."""
+        return hash(self._value)
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        source_type: Any,  # noqa: ANN401  # pydantic's hook signature
+        handler: GetCoreSchemaHandler,
+    ) -> core_schema.CoreSchema:
+        """Tell pydantic a Secret is already a Secret."""
+        return core_schema.is_instance_schema(cls)
+
+
+class RuleError(ValueError):
+    """One value that broke one rule, carrying the value so it can be masked.
+
+    The message holds the `VALUE` placeholder rather than the value itself, so
+    that a secret's bad value is masked by the renderer instead of by every
+    rule remembering to.
+    """
+
+    def __init__(self, value: str, message: str) -> None:
+        """Record the offending value and the rule it broke."""
+        super().__init__(message)
+        self.value = value
+        self.message = message
+
+
+# --- leaf parsing ----------------------------------------------------------
+#
+# Every leaf is parsed here rather than by pydantic's own coercion, so that
+# bad input produces the message docs/config.md documents and the Go template
+# produces, character for character.
+
+_INTEGER = re.compile(r"[+-]?[0-9]+")
+
+
+def _to_int(value: object) -> int:
+    """Parse an integer with exactly Go's `strconv.Atoi` grammar."""
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+
+    text = str(value)
+    if not _INTEGER.fullmatch(text):
+        raise RuleError(text, f"{VALUE} is not an integer")
+
+    return int(text)
+
+
+def _to_duration(value: object) -> Duration:
+    """Parse a duration with exactly Go's `time.ParseDuration` grammar."""
+    if isinstance(value, Duration):
+        return value
+
+    text = str(value)
+    try:
+        return Duration.parse(text)
+    except ValueError:
+        raise RuleError(text, f"{VALUE} is not a duration") from None
+
+
+def _to_secret(value: object) -> Secret:
+    """Wrap a value as a Secret."""
+    return value if isinstance(value, Secret) else Secret(str(value))
+
+
+# --- rules -----------------------------------------------------------------
+
+
+def _one_of(*allowed: str) -> AfterValidator:
+    """Build a rule that admits only the listed values."""
+
+    def rule(value: str) -> str:
+        if value not in allowed:
+            raise RuleError(value, f"{VALUE} is not one of {', '.join(allowed)}")
+        return value
+
+    return AfterValidator(rule)
+
+
+def _not_empty(value: str) -> str:
+    """Reject the empty string."""
+    if not value:
+        raise RuleError(value, "must not be empty")
+    return value
+
+
+def _port_range(value: int) -> int:
+    """Reject ports outside the unprivileged range."""
+    if value < 1024 or value > 65535:  # noqa: PLR2004  # the range IS the rule
+        raise RuleError(str(value), f"{VALUE} is not a port between 1024 and 65535")
+    return value
+
+
+def _not_negative(value: Duration) -> Duration:
+    """Reject a negative duration."""
+    if value.nanoseconds < 0:
+        raise RuleError(str(value), f"{VALUE} must not be negative")
+    return value
+
+
+_PROM_NAME = re.compile(r"^[a-zA-Z_:][a-zA-Z0-9_:]*$")
+
+
+def _prometheus_name(value: str) -> str:
+    """Reject a namespace a Prometheus metric name could not start with."""
+    if not _PROM_NAME.match(value):
+        raise RuleError(value, f"{VALUE} is not a valid Prometheus metric namespace")
+    return value
+
+
+NonEmpty = Annotated[str, AfterValidator(_not_empty)]
+Port = Annotated[int, BeforeValidator(_to_int), AfterValidator(_port_range)]
+Timeout = Annotated[Duration, BeforeValidator(_to_duration), AfterValidator(_not_negative)]
+SecretValue = Annotated[Secret, BeforeValidator(_to_secret)]
+
+
+# --- the config model ------------------------------------------------------
+
+
+class Section(BaseModel):
+    """A nested group of configuration keys."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class ServiceSettings(Section):
+    """Who this service is.
+
+    Single-sourced deliberately: OTEL_SERVICE_NAME and OTEL_RESOURCE_ATTRIBUTES
+    are ignored for these three, so the `service` and `env` fields on a log
+    line can never disagree with the same fields on a span.
+    """
+
+    name: NonEmpty = "{@ service_name @}"
+    version: NonEmpty = "0.1.0"
+    owner: NonEmpty = "{@ service_owner | replace('\\', '\\\\') | replace('"', '\\"') @}"
+
+
+class TimeoutSettings(Section):
+    """The phase deadlines the API listener enforces.
+
+    Carried here now and applied by the server, which Mint chunk 06 delivers.
+    """
+
+    read_header: Timeout = Duration(5_000_000_000)
+    write: Timeout = Duration(30_000_000_000)
+    idle: Timeout = Duration(60_000_000_000)
+    shutdown: Timeout = Duration(15_000_000_000)
+
+
+class ServerSettings(Section):
+    """Where and how this service listens."""
+
+    # The loopback interface, deliberately. Binding every interface is a
+    # decision someone makes, not a default nobody noticed.
+    host: NonEmpty = "127.0.0.1"
+    port: Port = {@ port @}
+    admin_port: Port = {@ admin_port @}
+    read_timeout: Timeout = Duration(30_000_000_000)
+    timeouts: TimeoutSettings = TimeoutSettings()
+
+
+class LoggingSettings(Section):
+    """The log tier and level.
+
+    Mint chunk 04 builds the logger from them; this package only resolves
+    them.
+    """
+
+    format: Annotated[str, _one_of("auto", "console", "json")] = "auto"
+    level: Annotated[str, _one_of("debug", "info", "warn", "error")] = "info"
+
+
+class TracingSettings(Section):
+    """The trace exporter's destination.
+
+    Empty means no exporter. The SDK's own localhost:4317 default is never
+    used, because "nothing configured" must not silently become "export to a
+    collector that isn't there".
+    """
+
+    otlp_endpoint: str = ""
+
+
+class MetricsSettings(Section):
+    """The namespace every metric this service exports is prefixed with."""
+
+    namespace: Annotated[str, AfterValidator(_prometheus_name)] = (
+        "{@ service_name | replace('-', '_') @}"
+    )
+
+
+class ObservabilitySettings(Section):
+    """Tracing and metrics settings.
+
+    Mint chunk 08 wires the exporters; this package owns where the endpoint
+    comes from.
+    """
+
+    tracing: TracingSettings = TracingSettings()
+    metrics: MetricsSettings = MetricsSettings()
+
+
+class DatabaseSettings(Section):
+    """This service's datastore credentials.
+
+    It carries the one secret-marked field in the shipped configuration, which
+    is what makes the masking rule observable in `make config` on day one
+    rather than the first time someone adds a real secret.
+    """
+
+    password: SecretValue = Secret("")
+
+
+class Settings(BaseSettings):
+    """This service's entire configuration.
+
+    Every leaf is a scalar: environment variables carry scalars only, so a
+    list or a dict here would be settable from YAML and not from the
+    environment, and the two loaders would stop being equivalent.
+
+    The defaults below are what a service runs on with no config files and no
+    environment variables set. They must be complete: `make run` in a fresh
+    checkout with `config/` deleted has to work.
+    """
+
+    model_config = SettingsConfigDict(extra="forbid", frozen=True)
+    # NOTE: no `env_file`, ever. See settings_customise_sources below.
+
+    env: Annotated[str, _one_of(*ENV_VALUES)] = "local"
+    service: ServiceSettings = ServiceSettings()
+    server: ServerSettings = ServerSettings()
+    logging: LoggingSettings = LoggingSettings()
+    observability: ObservabilitySettings = ObservabilitySettings()
+    database: DatabaseSettings = DatabaseSettings()
+
+    _origins: dict[str, str] = PrivateAttr(default_factory=dict)
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """Return exactly two sources, highest precedence first.
+
+        THIS OVERRIDE EXISTS TO REMOVE FUNCTIONALITY, AND IT MUST STAY. It is
+        here to hold parity with Mint's Go template, which has no config
+        framework and therefore has exactly the sources someone wrote.
+
+        `BaseSettings` builds from FOUR sources by default — `init_settings`,
+        `env_settings`, `dotenv_settings`, `file_secret_settings` — so a naive
+        subclass silently reads `.env` and `/run/secrets` while its Go twin
+        does not, and a `.env` file beats `config/config.local.yaml` with
+        nobody having written a line of code. That was measured, not feared.
+
+        Deleting this method in a cleanup would restore all four sources and
+        break nothing visibly until production. `source_names()`, the tests
+        that assert it is exactly ["yaml", "env"], and mint's `make parity`
+        are the backstop for when this comment fails to stop someone.
+        """
+        del settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings
+
+        # Built lowest precedence first, because that is how a human reads a
+        # precedence list; pydantic wants highest first.
+        return tuple(reversed(_context().sources))
+
+    def origin(self, key: str) -> str:
+        """Return the source that won for a key.
+
+        One of `default`, `yaml`, `local yaml`, `env`, or `env` naming a
+        foreign variable. The same answer `make config` prints.
+        """
+        return self._origins.get(key, "default")
+
+    def render(self) -> str:
+        """Return the effective configuration with secrets masked."""
+        # Imported here, not at module scope: render.py imports this module,
+        # and Python has no way to express Go's "one package, several files".
+        from .render import render  # noqa: PLC0415
+
+        return render(self)
+
+
+# --- the field walk --------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Field:
+    """One leaf of the config model: its key path and the variable that sets it."""
+
+    path: str
+    env: str
+    secret: bool
+
+
+def env_name(key: str) -> str:
+    """Return the one environment variable that sets the given config key.
+
+    This is the whole naming scheme, in one function, used by the loader, by
+    the error messages and by docs/config.md's table.
+    """
+    return ENV_PREFIX + key.replace(".", ENV_DELIM).upper()
+
+
+def fields(model: type[BaseModel] = Settings, prefix: tuple[str, ...] = ()) -> list[Field]:
+    """Walk the config model and return its leaves in declaration order.
+
+    This is the single authoring location the environment variable names, the
+    YAML keys and `make config` all derive from.
+    """
+    out: list[Field] = []
+
+    for name, info in model.model_fields.items():
+        annotation = info.annotation
+        path = (*prefix, name)
+
+        if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+            out.extend(fields(annotation, path))
+            continue
+
+        key = ".".join(path)
+        out.append(Field(path=key, env=env_name(key), secret=annotation is Secret))
+
+    return out
+
+
+def keys() -> list[str]:
+    """Return every configuration key, in the order the model declares them."""
+    return [f.path for f in fields()]
+
+
+def value_at(settings: BaseModel, path: str) -> object:
+    """Return the value of one config key."""
+    node: object = settings
+    for part in path.split("."):
+        node = getattr(node, part)
+    return node
+
+
+_KEY_SEGMENT = re.compile(r"^[a-z][a-z0-9_]*$")
+
+
+def check_keys(found: list[Field]) -> None:
+    """Assert the environment variable mapping is a BIJECTION, at startup.
+
+    Every key segment is snake_case and contains no `__`, so every variable
+    name decodes to exactly one config key — and no two keys can claim one
+    variable. Asserted over the whole model rather than trusted as a naming
+    guideline.
+    """
+    problems: list[str] = []
+    seen: dict[str, str] = {}
+
+    for entry in found:
+        for segment in entry.path.split("."):
+            if not _KEY_SEGMENT.match(segment):
+                problems.append(
+                    f"{entry.path}: segment {quote(segment)} does not match {_KEY_SEGMENT.pattern}"
+                )
+            if ENV_DELIM in segment:
+                problems.append(
+                    f"{entry.path}: segment {quote(segment)} contains "
+                    f"{quote(ENV_DELIM)}, which separates levels"
+                )
+
+        if entry.env in seen:
+            problems.append(f"{seen[entry.env]} and {entry.path} both map to {entry.env}")
+
+        seen[entry.env] = entry.path
+
+    if problems:
+        joined = "\n  - ".join(problems)
+        raise ConfigError(
+            "config: the config model breaks the environment variable naming "
+            f"bijection:\n  - {joined}"
+        )
+
+
+# --- errors ----------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class FieldError:
+    """One thing wrong with the configuration.
+
+    It names both the config key and the environment variable that sets it,
+    because a reader has one of the two in hand and needs the other.
+    """
+
+    key: str
+    env: str
+    detail: str
+
+
+class ConfigError(Exception):
+    """Configuration could not be loaded.
+
+    Configuration fails as a set: fixing one error at a time across three
+    restarts is the experience this avoids.
+    """
+
+    def __init__(self, message: str, errors: list[FieldError] | None = None) -> None:
+        """Build from a plain message, or from every field error at once."""
+        super().__init__(message)
+        self.message = message
+        self.errors = errors or []
+
+    def __str__(self) -> str:
+        """Render the message, which is already in docs/config.md's format."""
+        return self.message
+
+
+def multi_error(errors: list[FieldError]) -> ConfigError:
+    """Build the multi-error in the format docs/config.md documents.
+
+    Byte-identical to the Go template's.
+    """
+    noun = "error" if len(errors) == 1 else "errors"
+    lines = [f"config: {len(errors)} {noun}"]
+    lines += [f"  - {e.key} ({e.env}): {e.detail}" for e in errors]
+
+    return ConfigError("\n".join(lines), errors)
+
+
+# --- loading ---------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _Context:
+    """The sources prepared for the Settings currently being constructed."""
+
+    yaml: "SourceValues"
+    env: "SourceValues"
+    sources: tuple["MappingSource", ...] = ()
+
+
+_CTX: ContextVar[_Context | None] = ContextVar("mint_config_context", default=None)
+
+
+def _context() -> _Context:
+    """Return the prepared sources, preparing them if nobody has.
+
+    A bare `Settings()` — in a test, say — still reads the same two sources
+    from the default location rather than none at all.
+    """
+    ctx = _CTX.get()
+    return ctx if ctx is not None else prepare(Path("config"))
+
+
+def prepare(config_dir: Path) -> _Context:
+    """Read both sources, without validating anything yet."""
+    # Imported here, not at module scope: source.py imports this module for
+    # FieldError and the naming rule, and Python has no way to express Go's
+    # "one package, several files".
+    from .source import build_sources, read_env, read_yaml  # noqa: PLC0415
+
+    known = {f.path for f in fields()}
+    yaml_values = read_yaml(config_dir, known)
+    env_values = read_env(known)
+
+    return _Context(
+        yaml=yaml_values,
+        env=env_values,
+        sources=tuple(build_sources(Settings, yaml_values, env_values)),
+    )
+
+
+def load(config_dir: str | Path = "config") -> Settings:
+    """Resolve the configuration and validate it, reporting every error at once.
+
+    `config_dir` is the directory holding config.yaml and config.local.yaml.
+    It is a path, not a value: no flag and no source sets a configuration
+    VALUE except the two in `build_sources`.
+    """
+    found = fields()
+    check_keys(found)
+
+    order = {f.path: i for i, f in enumerate(found)}
+    secrets = {f.path for f in found if f.secret}
+
+    ctx = prepare(Path(config_dir))
+    errors = [*ctx.yaml.errors, *ctx.env.errors]
+
+    settings: Settings | None = None
+    token = _CTX.set(ctx)
+    try:
+        settings = Settings()
+    except ValidationError as exc:
+        errors.extend(_translate(exc, secrets))
+    finally:
+        _CTX.reset(token)
+
+    if errors:
+        errors.sort(key=lambda e: (order.get(e.key, len(order)), e.key))
+        raise multi_error(errors)
+
+    if settings is None:  # pragma: no cover — unreachable; validation succeeded
+        raise ConfigError("config: no settings and no errors")
+
+    settings._origins = _origins(found, ctx)  # noqa: SLF001  # its own private attribute
+
+    return settings
+
+
+def _origins(found: list[Field], ctx: _Context) -> dict[str, str]:
+    """Record which source won for each key, highest precedence last."""
+    out = {f.path: "default" for f in found}
+
+    for values, source in zip((ctx.yaml, ctx.env), ctx.sources, strict=True):
+        for key in values.values:
+            out[key] = values.origins.get(key, source.name)
+
+    return out
+
+
+def _translate(exc: ValidationError, secrets: set[str]) -> list[FieldError]:
+    """Turn pydantic's errors into Mint's, masking a secret's bad value.
+
+    The two languages' messages are authored once each and must match; this is
+    the seam where Python's differ if they ever do.
+    """
+    out: list[FieldError] = []
+
+    for raw in exc.errors():
+        key = ".".join(str(part) for part in raw["loc"])
+        cause = raw.get("ctx", {}).get("error")
+
+        if isinstance(cause, RuleError):
+            shown = MASK if key in secrets else cause.value
+            detail = cause.message.replace(VALUE, quote(shown))
+        elif isinstance(cause, Exception):
+            detail = str(cause)
+        else:
+            detail = raw["msg"]
+
+        out.append(FieldError(key=key, env=env_name(key), detail=detail))
+
+    return out
+
+
+def default() -> Settings:
+    """Return the configuration with no sources read at all.
+
+    What a service would run on with no config files and no environment.
+    """
+    token = _CTX.set(_Context(yaml=_empty(), env=_empty()))
+    try:
+        return Settings()
+    finally:
+        _CTX.reset(token)
+
+
+def _empty() -> "SourceValues":
+    """Return an empty source result."""
+    from .source import SourceValues  # noqa: PLC0415
+
+    return SourceValues()

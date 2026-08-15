@@ -1,16 +1,16 @@
-# [[ service_name ]]
+# {@ service_name @}
 
-[[ service_description ]]
+{@ service_description @}
 
 | | |
 | --- | --- |
-| **Owner** | [[ service_owner ]] |
-| **Repo** | `[[ repo_url ]]` |
-| **API** | <http://localhost:[[ port ]]> |
-| **Admin port** | `[[ admin_port ]]` — recorded now, served from Mint chunk 06 |
-[% if _copier_answers._commit %]
-Minted from `[[ language ]]-service` @ `[[ _copier_answers._commit ]]`.
-[% endif %]
+| **Owner** | {@ service_owner @} |
+| **Repo** | `{@ repo_url @}` |
+| **API** | <http://localhost:{@ port @}> |
+| **Admin port** | `{@ admin_port @}` — recorded now, served from Mint chunk 06 |
+{% if _copier_answers._commit %}
+Minted from `{@ language @}-service` @ `{@ _copier_answers._commit @}`.
+{% endif %}
 ## Quick start
 
 You need [asdf](https://asdf-vm.com) and [direnv](https://direnv.net). Then:
@@ -18,8 +18,8 @@ You need [asdf](https://asdf-vm.com) and [direnv](https://direnv.net). Then:
 ```sh
 asdf install                  # installs exactly what .tool-versions pins
 direnv allow                  # once; loads .env and puts ./bin on PATH
-make run                      # serves the API on :[[ port ]]
-curl -i localhost:[[ port ]]/   # -> 200, "ok"
+make run                      # serves the API on :{@ port @}
+curl -i localhost:{@ port @}/   # -> 200, "ok"
 ```
 
 `make help` lists every target. The target names, their descriptions and
@@ -35,7 +35,6 @@ ships it:
 
 | | |
 | --- | --- |
-| configuration | Mint chunk 03 |
 | logging | Mint chunk 04 |
 | the error contract | Mint chunk 05 |
 | middleware, health endpoints, the admin listener, graceful shutdown | Mint chunk 06 |
@@ -53,7 +52,7 @@ directories are for.
 ## Layout
 
 ```
-cmd/[[ service_name ]]/       composition root — wiring only, no logic
+cmd/{@ service_name @}/       composition root — wiring only, no logic
 internal/transport/http/      the ONLY package that may import net/http
 internal/service/             business logic; plain Go values in and out
 internal/repository/          databases and other services, behind interfaces

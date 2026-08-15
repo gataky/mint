@@ -1,0 +1,628 @@
+package config
+
+// This file is the config TYPE and the loader built on top of it. The
+// package's own documentation — what belongs in here and what does not — is
+// in doc.go, and the user-facing rules are in docs/config.md.
+//
+// Adding a field is one edit: add it to the struct with a `yaml` tag. That
+// makes it settable from config/config.yaml, settable from the environment,
+// and visible in `make config`, because all three derive from the same tag.
+// No field carries a hand-written environment variable name.
+
+import (
+	"errors"
+	"fmt"
+	"reflect"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// EnvPrefix is the constant every environment variable this service reads
+// begins with.
+//
+// It is deliberately NOT derived from the service name. Kubernetes already
+// injects {SVCNAME}_PORT=tcp://10.0.162.149:8080 for every Service by
+// default, and this service's name is DNS-label-safe precisely so that it can
+// BE that Service — so a service-derived prefix would read a URL as a port.
+// One constant, so an org forking Mint changes it in one place.
+const EnvPrefix = "MINT_"
+
+// envDelim separates config key levels inside an environment variable name.
+//
+// A single underscore is never a separator, so a key's own underscores
+// survive: server.read_timeout becomes MINT_SERVER__READ_TIMEOUT. The
+// single-underscore form is not injective — server.read_timeout and
+// server.read.timeout would collide, and the loser would be decided by struct
+// field order.
+const envDelim = "__"
+
+// maskText is what a Secret renders as, everywhere configuration is printed.
+const maskText = "********"
+
+// Environments this service may run in. Anything else is a startup error, not
+// a silent fallback to a default.
+var envValues = []string{"local", "dev", "staging", "prod"}
+
+// Secret is a configuration value that is masked everywhere it is rendered.
+//
+// Masking is a property of THIS TYPE, not of the field's name and not of
+// remembering to mask at each call site: a Secret's String method returns the
+// mask, so any code that formats one gets the mask for free. Call Reveal to
+// get the value, which is the one line a reader can grep for.
+type Secret string
+
+// String returns the mask, never the value. An unset secret renders empty
+// because there is nothing to hide.
+func (s Secret) String() string {
+	if s == "" {
+		return ""
+	}
+
+	return maskText
+}
+
+// Reveal returns the secret's actual value. Every use of it is a place a
+// secret can escape, which is why it is spelled out rather than implicit.
+func (s Secret) Reveal() string { return string(s) }
+
+// Config is this service's entire configuration.
+//
+// Every leaf field is a scalar: environment variables carry scalars only, so
+// a list or a map here would be settable from YAML and not from the
+// environment, and the two loaders would stop being equivalent.
+type Config struct {
+	Env           string        `yaml:"env"`
+	Service       Service       `yaml:"service"`
+	Server        Server        `yaml:"server"`
+	Logging       Logging       `yaml:"logging"`
+	Observability Observability `yaml:"observability"`
+	Database      Database      `yaml:"database"`
+
+	// origins records which source won for each key. It is unexported, so
+	// the reflective walk skips it and it can never become a config key.
+	origins map[string]string
+}
+
+// Service is who this service is. Single-sourced on purpose: OTEL_SERVICE_NAME
+// and OTEL_RESOURCE_ATTRIBUTES are ignored for these fields, because a log
+// line and a span disagreeing about `service` or `env` breaks the path from a
+// reported error to its trace.
+type Service struct {
+	Name    string `yaml:"name"`
+	Version string `yaml:"version"`
+	Owner   string `yaml:"owner"`
+}
+
+// Server is where and how this service listens.
+type Server struct {
+	Host        string   `yaml:"host"`
+	Port        int      `yaml:"port"`
+	AdminPort   int      `yaml:"admin_port"`
+	ReadTimeout Duration `yaml:"read_timeout"`
+	Timeouts    Timeouts `yaml:"timeouts"`
+}
+
+// Timeouts are the phase deadlines the API listener enforces. They are
+// carried here now and applied by Mint chunk 06, which owns the lifecycle.
+type Timeouts struct {
+	ReadHeader Duration `yaml:"read_header"`
+	Write      Duration `yaml:"write"`
+	Idle       Duration `yaml:"idle"`
+	Shutdown   Duration `yaml:"shutdown"`
+}
+
+// Logging carries the log tier and level. Mint chunk 04 builds the logger
+// from them; this package only resolves them.
+type Logging struct {
+	Format string `yaml:"format"`
+	Level  string `yaml:"level"`
+}
+
+// Observability carries the tracing and metrics settings. Mint chunk 08 wires
+// the exporters; this package owns where the endpoint comes from.
+type Observability struct {
+	Tracing Tracing `yaml:"tracing"`
+	Metrics Metrics `yaml:"metrics"`
+}
+
+// Tracing is the trace exporter's destination. Empty means no exporter — the
+// SDK's own localhost:4317 default is never used, because "nothing
+// configured" must not silently become "export to a collector that isn't
+// there".
+type Tracing struct {
+	OTLPEndpoint string `yaml:"otlp_endpoint"`
+}
+
+// Metrics is the Prometheus namespace every metric this service exports is
+// prefixed with.
+type Metrics struct {
+	Namespace string `yaml:"namespace"`
+}
+
+// Database is this service's datastore credentials. It carries the one
+// secret-marked field in the shipped configuration, which is what makes the
+// masking rule observable in `make config` on day one rather than the first
+// time someone adds a real secret.
+type Database struct {
+	Password Secret `yaml:"password"`
+}
+
+// Default is the configuration a service runs on with no config files and no
+// environment variables set. It must be complete: `make run` in a fresh
+// checkout with config/ deleted has to work.
+func Default() Config {
+	return Config{
+		Env: "local",
+		Service: Service{
+			Name:    "{@ service_name @}",
+			Version: "0.1.0",
+			Owner:   "{@ service_owner | replace('\\', '\\\\') | replace('"', '\\"') @}",
+		},
+		Server: Server{
+			Host:        "127.0.0.1",
+			Port:        {@ port @},
+			AdminPort:   {@ admin_port @},
+			ReadTimeout: Duration(30 * time.Second),
+			Timeouts: Timeouts{
+				ReadHeader: Duration(5 * time.Second),
+				Write:      Duration(30 * time.Second),
+				Idle:       Duration(60 * time.Second),
+				Shutdown:   Duration(15 * time.Second),
+			},
+		},
+		Logging: Logging{
+			Format: "auto",
+			Level:  "info",
+		},
+		Observability: Observability{
+			Tracing: Tracing{OTLPEndpoint: ""},
+			Metrics: Metrics{Namespace: "{@ service_name | replace('-', '_') @}"},
+		},
+		Database: Database{Password: ""},
+		origins:  nil,
+	}
+}
+
+// Load resolves the configuration from the ordered source list and validates
+// it, reporting every invalid value at once.
+//
+// dir is the directory holding config.yaml and config.local.yaml. It is a
+// path, not a value: no flag and no source sets a configuration VALUE except
+// the two in Sources.
+func Load(dir string) (*Config, error) {
+	cfg := Default()
+
+	fields := fieldsOf(&cfg)
+	if err := checkKeys(fields); err != nil {
+		return nil, err
+	}
+
+	index := make(map[string]*field, len(fields))
+	order := make(map[string]int, len(fields))
+	known := make(map[string]bool, len(fields))
+	origins := make(map[string]string, len(fields))
+
+	for i := range fields {
+		f := &fields[i]
+		index[f.Path] = f
+		order[f.Path] = i
+		known[f.Path] = true
+		origins[f.Path] = "default"
+	}
+
+	var (
+		errs   []FieldError
+		failed = map[string]bool{}
+	)
+
+	// Lowest precedence first. A later source overwrites an earlier one, and
+	// that single loop is the ONLY place precedence is expressed.
+	for _, src := range Sources(dir, known) {
+		values, err := src.Load()
+
+		var serr *sourceError
+		switch {
+		case err == nil:
+		case errors.As(err, &serr):
+			errs = append(errs, serr.errs...)
+		default:
+			return nil, fmt.Errorf("config: %s source: %w", src.Name(), err)
+		}
+
+		for _, key := range sortedKeys(values) {
+			f, ok := index[key]
+			if !ok {
+				continue // not a key of this service; documented as ignored
+			}
+
+			raw := values[key]
+			if err := setLeaf(f.value, raw); err != nil {
+				errs = append(errs, newFieldError(f, raw, err.Error()))
+				failed[key] = true
+
+				continue
+			}
+
+			delete(failed, key)
+			origins[key] = originOf(src, key)
+		}
+	}
+
+	for i := range fields {
+		f := &fields[i]
+		if failed[f.Path] {
+			continue // already reported; pydantic skips a field's rules the same way
+		}
+
+		if check, ok := validators[f.Path]; ok {
+			if detail := check(f.value); detail != "" {
+				errs = append(errs, newFieldError(f, validatorValue(f.value), detail))
+			}
+		}
+	}
+
+	if len(errs) > 0 {
+		sortErrors(errs, order, len(fields))
+
+		return nil, &Error{Errors: errs}
+	}
+
+	cfg.origins = origins
+
+	return &cfg, nil
+}
+
+// Keys returns every configuration key, in the order the config type declares
+// them. `make config` prints them in this order and so does the multi-error.
+func Keys() []string {
+	cfg := Default()
+
+	fields := fieldsOf(&cfg)
+	out := make([]string, 0, len(fields))
+
+	for i := range fields {
+		out = append(out, fields[i].Path)
+	}
+
+	return out
+}
+
+// EnvName returns the one environment variable that sets the given config
+// key. This is the whole naming scheme, in one function, used by the loader,
+// by the error messages and by docs/config.md's table.
+func EnvName(key string) string {
+	return EnvPrefix + strings.ToUpper(strings.ReplaceAll(key, ".", envDelim))
+}
+
+// --- errors ----------------------------------------------------------------
+
+// FieldError is one thing wrong with the configuration. It names both the
+// config key and the environment variable that sets it, because a reader has
+// one of the two in hand and needs the other.
+type FieldError struct {
+	Key    string
+	Env    string
+	Detail string
+}
+
+// Error is every FieldError at once. Configuration fails as a set: fixing one
+// error at a time across three restarts is the experience this avoids.
+type Error struct {
+	Errors []FieldError
+}
+
+// Error renders the multi-error in the format docs/config.md documents, which
+// is byte-identical to the Python template's.
+func (e *Error) Error() string {
+	noun := "errors"
+	if len(e.Errors) == 1 {
+		noun = "error"
+	}
+
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "config: %d %s", len(e.Errors), noun)
+
+	for _, fe := range e.Errors {
+		fmt.Fprintf(&b, "\n  - %s (%s): %s", fe.Key, fe.Env, fe.Detail)
+	}
+
+	return b.String()
+}
+
+// The two leaf parse failures. Their text carries valuePlaceholder for the
+// same reason the rules below do: newFieldError is the one place that decides
+// whether the offending value is printed or masked.
+var (
+	errNotInteger  = errors.New(valuePlaceholder + " is not an integer")
+	errNotDuration = errors.New(valuePlaceholder + " is not a duration")
+)
+
+func newFieldError(f *field, raw, detail string) FieldError {
+	shown := raw
+	if f.Secret {
+		shown = maskText
+	}
+
+	return FieldError{
+		Key:    f.Path,
+		Env:    f.Env,
+		Detail: strings.ReplaceAll(detail, valuePlaceholder, quote(shown)),
+	}
+}
+
+// valuePlaceholder is where a rule's message wants the offending value. Going
+// through a placeholder is what lets newFieldError mask a secret's value
+// without every rule having to know about secrets.
+const valuePlaceholder = "\x00value\x00"
+
+func sortErrors(errs []FieldError, order map[string]int, unknown int) {
+	sort.SliceStable(errs, func(i, j int) bool {
+		oi, ok := order[errs[i].Key]
+		if !ok {
+			oi = unknown
+		}
+
+		oj, ok := order[errs[j].Key]
+		if !ok {
+			oj = unknown
+		}
+
+		if oi != oj {
+			return oi < oj
+		}
+
+		return errs[i].Key < errs[j].Key
+	})
+}
+
+// --- the reflective walk ---------------------------------------------------
+
+// field is one leaf of the config type: its key path, the environment
+// variable derived from that path, and a settable handle on the value.
+type field struct {
+	Path   string
+	Env    string
+	Secret bool
+	value  reflect.Value
+}
+
+var secretType = reflect.TypeOf(Secret(""))
+
+// fieldsOf walks a pointer to a config struct and returns its leaves in
+// declaration order. It is the single authoring location the env names, the
+// YAML keys and `make config` all derive from.
+func fieldsOf(cfg any) []field {
+	var out []field
+
+	walk(reflect.ValueOf(cfg).Elem(), nil, &out)
+
+	return out
+}
+
+func walk(v reflect.Value, path []string, out *[]field) {
+	t := v.Type()
+
+	for i := range t.NumField() {
+		sf := t.Field(i)
+		if sf.PkgPath != "" {
+			continue // unexported: not configuration
+		}
+
+		name, _, _ := strings.Cut(sf.Tag.Get("yaml"), ",")
+		if name == "" || name == "-" {
+			continue
+		}
+
+		next := make([]string, 0, len(path)+1)
+		next = append(next, path...)
+		next = append(next, name)
+
+		fv := v.Field(i)
+		if fv.Kind() == reflect.Struct {
+			walk(fv, next, out)
+
+			continue
+		}
+
+		key := strings.Join(next, ".")
+		*out = append(*out, field{
+			Path:   key,
+			Env:    EnvName(key),
+			Secret: fv.Type() == secretType,
+			value:  fv,
+		})
+	}
+}
+
+var keySegment = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+
+// checkKeys asserts the env-var mapping is a BIJECTION over the whole config
+// type, at startup, rather than trusting a naming guideline. Every key
+// segment is snake_case and contains no "__", so every variable name decodes
+// to exactly one config key — and no two keys can claim one variable.
+func checkKeys(fields []field) error {
+	var problems []string
+
+	seen := make(map[string]string, len(fields))
+
+	for i := range fields {
+		f := &fields[i]
+
+		for _, seg := range strings.Split(f.Path, ".") {
+			if !keySegment.MatchString(seg) {
+				problems = append(problems,
+					fmt.Sprintf("%s: segment %s does not match %s", f.Path, quote(seg), keySegment.String()))
+			}
+
+			if strings.Contains(seg, envDelim) {
+				problems = append(problems,
+					fmt.Sprintf("%s: segment %s contains %s, which separates levels", f.Path, quote(seg), quote(envDelim)))
+			}
+		}
+
+		if prev, dup := seen[f.Env]; dup {
+			problems = append(problems,
+				fmt.Sprintf("%s and %s both map to %s", prev, f.Path, f.Env))
+		}
+
+		seen[f.Env] = f.Path
+	}
+
+	if len(problems) > 0 {
+		return fmt.Errorf(
+			"config: the config type breaks the environment variable naming bijection:\n  - %s",
+			strings.Join(problems, "\n  - "))
+	}
+
+	return nil
+}
+
+// setLeaf parses raw into the leaf, producing the same message the Python
+// template produces for the same bad input.
+func setLeaf(v reflect.Value, raw string) error {
+	switch v.Interface().(type) {
+	case Duration:
+		d, err := time.ParseDuration(raw)
+		if err != nil {
+			return errNotDuration
+		}
+
+		v.SetInt(int64(d))
+
+	case Secret:
+		v.SetString(raw)
+
+	default:
+		switch v.Kind() { //nolint:exhaustive // config leaves are strings and ints
+		case reflect.String:
+			v.SetString(raw)
+
+		case reflect.Int:
+			n, err := strconv.Atoi(raw)
+			if err != nil {
+				return errNotInteger
+			}
+
+			v.SetInt(int64(n))
+
+		default:
+			return fmt.Errorf("config: unsupported leaf type %s", v.Type()) //nolint:err113 // template bug, not user input
+		}
+	}
+
+	return nil
+}
+
+// --- validation rules ------------------------------------------------------
+
+// validators is the rule for each key. A key with no entry here is valid as
+// long as it parsed. The rules live in one table so the two languages can be
+// read side by side.
+var validators = map[string]func(v reflect.Value) string{
+	"env":                             oneOf(envValues...),
+	"service.name":                    notEmpty,
+	"service.version":                 notEmpty,
+	"service.owner":                   notEmpty,
+	"server.host":                     notEmpty,
+	"server.port":                     portRange,
+	"server.admin_port":               portRange,
+	"server.read_timeout":             notNegative,
+	"server.timeouts.read_header":     notNegative,
+	"server.timeouts.write":           notNegative,
+	"server.timeouts.idle":            notNegative,
+	"server.timeouts.shutdown":        notNegative,
+	"logging.format":                  oneOf("auto", "console", "json"),
+	"logging.level":                   oneOf("debug", "info", "warn", "error"),
+	"observability.metrics.namespace": prometheusName,
+}
+
+func oneOf(allowed ...string) func(v reflect.Value) string {
+	return func(v reflect.Value) string {
+		got := v.String()
+		for _, a := range allowed {
+			if got == a {
+				return ""
+			}
+		}
+
+		return valuePlaceholder + " is not one of " + strings.Join(allowed, ", ")
+	}
+}
+
+func notEmpty(v reflect.Value) string {
+	if v.String() == "" {
+		return "must not be empty"
+	}
+
+	return ""
+}
+
+func portRange(v reflect.Value) string {
+	if n := v.Int(); n < 1024 || n > 65535 {
+		return valuePlaceholder + " is not a port between 1024 and 65535"
+	}
+
+	return ""
+}
+
+func notNegative(v reflect.Value) string {
+	if v.Int() < 0 {
+		return valuePlaceholder + " must not be negative"
+	}
+
+	return ""
+}
+
+var promName = regexp.MustCompile(`^[a-zA-Z_:][a-zA-Z0-9_:]*$`)
+
+func prometheusName(v reflect.Value) string {
+	if !promName.MatchString(v.String()) {
+		return valuePlaceholder + " is not a valid Prometheus metric namespace"
+	}
+
+	return ""
+}
+
+// --- small helpers ---------------------------------------------------------
+
+// quote renders a value the way both templates render it: wrapped in double
+// quotes with backslashes and quotes escaped, and nothing else. Go's %q and
+// Python's repr disagree on non-ASCII, so neither is used.
+func quote(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+
+	return `"` + s + `"`
+}
+
+func sortedKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+
+	sort.Strings(out)
+
+	return out
+}
+
+// validatorValue renders a leaf for a rule's message. Rules read strings and
+// ints through reflect, so this exists only for the int and Duration cases.
+func validatorValue(v reflect.Value) string {
+	switch x := v.Interface().(type) {
+	case Duration:
+		return x.String()
+	case Secret:
+		return x.String()
+	case string:
+		return x
+	case int:
+		return strconv.Itoa(x)
+	default:
+		return fmt.Sprint(v.Interface())
+	}
+}
