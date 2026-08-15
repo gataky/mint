@@ -27,15 +27,21 @@ regardless of which language it is.
 
 | what | where |
 | --- | --- |
-| The specification | [`prompt.md`](prompt.md) — the durable statement of what Mint must be |
+| **Decisions and why — the authority** | [`docs/decisions/`](docs/decisions/README.md) |
+| The specification | [`prompt.md`](prompt.md) — durable, but **outranked by the ADRs** |
 | Implementation chunks | [`tasks/`](tasks/README.md) — ordered, one per agent session |
-| Decisions and why | [`docs/decisions/`](docs/decisions/README.md) |
 | Shared source-of-truth docs | `docs/architecture.md`, `logging.md`, `config.md`, `agents.md`, `testing.md` |
-| Language-agnostic template files | `templates/_common/` |
-| The two templates | `templates/go-service/`, `templates/python-service/` |
+| The single template definition | `copier.yml` + `questions-shared.yml`, **at the repo root** |
+| Language-agnostic template files | `templates/_common/`, reached by relative symlink |
+| The two template trees | `templates/go-service/template/`, `templates/python-service/template/` |
 | Drift + smoke harnesses | `scripts/parity.sh`, `scripts/verify-template.sh` |
 
 Run `make help` for this repo's targets.
+
+**The ADRs outrank the spec.** Chunk 01 ran real spikes and several
+contradicted assumptions `prompt.md` was built on — three of them *silently*,
+which is why they're worth knowing before you touch anything. Where the spec
+and an ADR disagree, the spec is stale.
 
 ## Rules for working here
 
