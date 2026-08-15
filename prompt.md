@@ -253,7 +253,7 @@ same tree under `src/<package_name>/`.
 ├── llms.txt                        # generated, COMMITTED (ADR 0007)
 ├── .gitattributes                  # openapi.json -merge
 ├── AGENTS.md
-├── CLAUDE.md                       # symlink to AGENTS.md
+├── CLAUDE.md                       # real file importing @AGENTS.md — see below
 ├── .gitignore
 ├── .tool-versions
 ├── .envrc
@@ -643,7 +643,16 @@ in the test client.
 ## AI-agent discoverability
 
 **AGENTS.md** at the root of the template repo and every generated service,
-with `CLAUDE.md` symlinked to it. It carries the three-layer architecture and
+alongside a `CLAUDE.md`. In **mint's own repo** that is a symlink. In a
+**generated service it cannot be**: `preserve_symlinks` is off — which is
+precisely what makes `docs/` land as real files rather than links pointing
+back into the template — and it applies to every link, so a symlinked
+CLAUDE.md would be resolved into a second full copy of AGENTS.md and drift
+within a week. It ships as a one-line file importing `@AGENTS.md`, carrying
+a comment that explains the asymmetry and the `ln -sf` fix for anyone who
+prefers a link.
+
+AGENTS.md carries the three-layer architecture and
 its rules, the registry and how to add an operation, where widgets lives, the
 error taxonomy, and explicit "don't do this" boundaries. Commands live in a
 **generated block** written by `make agents-docs` from the Makefile's `##`

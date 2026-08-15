@@ -82,10 +82,16 @@ else.
    chunk files, not as questions — don't re-open them.
 
 5. **Pin every version.** No floating dependencies, no "latest at generation
-   time" resolution. **ADR 0011's table is the pin list** — Go 1.26.6,
-   CPython 3.14.7, uv 0.12.5, golangci-lint 2.12.2, gofumpt 0.11.0, ruff
-   0.16.3, mypy 2.3.0, plus the eleven Python runtime pins. No ranges, no
-   `latest`, no `^`/`~`, anywhere. `uv.lock` and `go.sum` are committed.
+   time" resolution. No ranges, no `latest`, no `^`/`~`, anywhere. `uv.lock`
+   and `go.sum` are committed.
+
+   **The pin list is the manifests themselves** — `.tool-versions`, `go.mod`
+   (including `tool` directives), `pyproject.toml`, `uv.lock` — not a table
+   in a document ([ADR 0015](../docs/decisions/0015-the-manifests-are-the-pin-list.md)).
+   ADR 0011's table is a snapshot of what chunk 01 decided, not a live index;
+   it went stale twice during chunk 02 alone. A chunk that adds a dependency
+   states the pin in its handoff. Write an ADR for the *choice* — "tint
+   rather than zap" — never merely to register a version number.
 
 6. **Leave the repo green.** At the end of every chunk, `make parity`,
    `make verify`, and `make test` all pass. If a chunk can't leave it green,

@@ -54,3 +54,4 @@ neither one owned.
 | [0012](0012-pin-lmittmann-tint-for-go-console-logging.md) | Pin `lmittmann/tint` v1.2.0 for Go tier-1 colour | 0010 approved a colour dependency; 0011's pin table had no row for one |
 | [0013](0013-govern-the-downgraded-openapi-document.md) | Govern the 3.0.3 downgrade under 0007's rules | 0007 named two generated files; 0001 later required a third |
 | [0014](0014-python-entrypoint-owns-its-servers-and-signals.md) | The Python root builds its own Servers and owns signals | 0010 requires `uvicorn.run(...)`; 0008 requires two Servers — `run()` cannot do both |
+| [0015](0015-the-manifests-are-the-pin-list.md) | The template manifests are the pin list, not a table | 0011's table went stale twice in one chunk — a markdown copy of an executable fact |
