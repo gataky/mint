@@ -133,26 +133,64 @@ fi
 # Normalization. Intentional differences are listed EXPLICITLY rather than
 # smoothed away by a clever regex — adding to this list should require
 # justifying the divergence, which a fuzzy normalizer would let you skip.
-normalize() { # normalize <dir>
+#
+# Package docs are MAPPED to a common name, not filtered. Go marks a package
+# with doc.go and Python with __init__.py; they mean the same thing, so they
+# normalize to __pkgdoc__. Filtering both instead would have been easier and
+# wrong — a directory containing only a package doc would then vanish from
+# both sides, and "Go has this package, Python doesn't" would stop being
+# visible to the check at all.
+# The four documented divergences, and why each is a language fact rather
+# than drift someone should fix:
+#
+#   cmd/ vs src/     entrypoint containers. Go modules put commands under
+#                    cmd/<name>/; Python packaging expects src/<pkg>/.
+#   main.go vs       Go's entrypoint is a main package; Python's is the
+#     __main__.py    module the interpreter runs with `python -m`.
+#   doc.go vs        Go's package doc can live in ANY file in the package —
+#     __init__.py    internal/transport/http/ carries it in server.go — while
+#                    __init__.py is mandatory for a Python package to be
+#                    importable at all. They are not 1:1, so neither is
+#                    mapped onto the other; the directory check below is what
+#                    actually guarantees the packages correspond.
+#   go.mod etc.      per-language manifests with no counterpart.
+#
+# Everything else must match.
+
+norm_dirs() { # norm_dirs <dir> — the set of package directories
+  ( cd "$1" && find . -type d -not -path './.git*' -not -path './bin*' \
+      | sed -e 's|^\./||' -e 's|^src/widget_svc||' -e 's|^/||' \
+      | grep -v -E '^(cmd|src|cmd/widget-svc|\.)?$' \
+      | sort -u )
+}
+
+normalize() { # normalize <dir> — meaningful files, package markers excluded
   ( cd "$1" && find . -type f -not -path './.git/*' \
       | sed -e 's|^\./||' \
             -e 's|^src/widget_svc/||' \
             -e 's|\.go$||' -e 's|\.py$||' \
       | grep -v -E '^(go\.mod|go\.sum|pyproject\.toml|uv\.lock|\.golangci\.yml)$' \
       | grep -v -E '^(cmd/widget-svc/main|__main__|__init__)$' \
-      | grep -v -E '/__init__$' \
+      | grep -v -E '(^|/)(doc|__init__)$' \
       | sort )
 }
 
 if [[ -d "$WORK/go" && -d "$WORK/py" ]]; then
-  if diff_out=$(diff <(normalize "$WORK/go") <(normalize "$WORK/py")); then
-    pass "normalized directory trees match"
+  if diff_out=$(diff <(norm_dirs "$WORK/go") <(norm_dirs "$WORK/py")); then
+    pass "package directory sets match"
   else
-    fail "normalized directory trees" "< go-service   > python-service
+    fail "package directory sets" "< go-service   > python-service
+$diff_out"
+  fi
+  if diff_out=$(diff <(normalize "$WORK/go") <(normalize "$WORK/py")); then
+    pass "normalized file trees match"
+  else
+    fail "normalized file trees" "< go-service   > python-service
 $diff_out"
   fi
 else
-  fail "normalized directory trees" "one or both services were not generated (see above)"
+  fail "package directory sets" "one or both services were not generated (see above)"
+  fail "normalized file trees" "one or both services were not generated (see above)"
 fi
 
 # --- 4. `make help` output -------------------------------------------------
@@ -162,11 +200,24 @@ fi
 
 strip_ansi() { sed -e $'s/\033\\[[0-9;]*m//g'; }
 
+# Both must SUCCEED before they are compared. Comparing first would let two
+# identically-broken outputs pass — which is not hypothetical: an unescaped
+# apostrophe in service_description once broke `make help` in both languages
+# at once, and this check reported them as matching, because they did.
 if [[ -d "$WORK/go" && -d "$WORK/py" ]]; then
-  go_help=$(make -C "$WORK/go" help 2>&1 | strip_ansi)
-  py_help=$(make -C "$WORK/py" help 2>&1 | strip_ansi)
-  if diff_out=$(diff <(echo "$go_help") <(echo "$py_help")); then
-    pass "\`make help\` output is identical"
+  go_help=$(make -C "$WORK/go" help 2>&1 | strip_ansi); go_rc=$?
+  py_help=$(make -C "$WORK/py" help 2>&1 | strip_ansi); py_rc=$?
+  if [[ $go_rc -ne 0 || $py_rc -ne 0 ]]; then
+    fail "\`make help\` runs" "make help must exit 0 in both services before their output means
+anything. go=$go_rc python=$py_rc
+
+go:
+$go_help
+
+python:
+$py_help"
+  elif diff_out=$(diff <(echo "$go_help") <(echo "$py_help")); then
+    pass "\`make help\` succeeds in both and output is identical"
   else
     fail "\`make help\` output" "< go-service   > python-service
 $diff_out"
@@ -191,6 +242,36 @@ else
   fail "generated artifacts in templates (ADR 0007)" "these must never be template files — copier update would conflict on
 them forever. Generate them with 'make agents-docs' instead:
 $stowaways"
+fi
+
+# --- 6. No unrendered template delimiters in generated output --------------
+#
+# Added after a near-miss that says something important about what parity
+# checks can and cannot do.
+#
+# Both Makefiles were briefly authored WITHOUT a .jinja suffix. Copier's
+# default `_templates_suffix` is `.jinja`, so files lacking it are copied
+# verbatim — both generated services got a Makefile containing a literal
+# `[[ service_name ]]`. Check #4 compared the two and found them identical,
+# because they were: identically broken. It passed.
+#
+# A parity check compares the two languages TO EACH OTHER. It is structurally
+# incapable of catching a defect they share. That is verify-template.sh's job
+# — and this check's, because it is cheap here and the trees are already
+# generated.
+
+unrendered=""
+for d in "$WORK/go" "$WORK/py"; do
+  [[ -d "$d" ]] || continue
+  found=$(grep -rlE '\[\[|\[%' "$d" --exclude-dir=.git 2>/dev/null || true)
+  [[ -n "$found" ]] && unrendered+="${found}"$'\n'
+done
+if [[ -z "${unrendered// }" ]]; then
+  pass "no unrendered template delimiters in generated output"
+else
+  fail "unrendered template delimiters" "these files reached a generated service with [[ ]] or [% %] intact,
+which usually means the template file is missing its .jinja suffix:
+$(echo "$unrendered" | sed "s|$WORK/||" | grep -v '^$')"
 fi
 
 # --- summary ---------------------------------------------------------------

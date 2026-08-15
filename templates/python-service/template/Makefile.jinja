@@ -21,7 +21,11 @@ endef
 .PHONY: help run build test test-integration lint fmt config agents-docs clean
 
 help: ## Show this help
-	@printf '\n[[ service_name ]] — [[ service_description ]]\n\n'
+	@# service_description is user-supplied and reaches a single-quoted
+	@# shell string, so it is passed as an ARGUMENT and its quotes escaped.
+	@# An apostrophe in the description ("mint's") otherwise terminates the
+	@# string and `make help` dies with a bash syntax error.
+	@printf '\n%s — %s\n\n' '[[ service_name ]]' '[[ service_description | replace("'", "'\\''") ]]'
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@printf '\nDocs: AGENTS.md · docs/ · http://localhost:[[ port ]]/llms.txt\n\n'
