@@ -4,28 +4,54 @@ Two reference microservices — one Go, one Python — that expose the **same AP
 and the **same Makefile**. A client cannot tell which one it is talking to; a
 developer moving between them does not have to relearn anything.
 
-Once these are right, they become [Copier](https://copier.readthedocs.io/)
-templates for minting new services. **That step has not been taken yet** — see
+Each one is also the source of a [Copier](https://copier.readthedocs.io/)
+template for minting new services. **Go is templated; Python is next** — see
 [Where this is going](#where-this-is-going).
 
 ```
 mint/
 ├── go-service/       Go 1.26 · net/http · huma · koanf · slog + tint · OTel
-└── python-service/   Python 3.14 · FastAPI · uvicorn · pydantic-settings · loguru · OTel
+├── py-service/       Python 3.14 · FastAPI · uvicorn · pydantic-settings · loguru · OTel
+├── copier.yml        the template definition — one, at the repo root
+└── templates/
+    └── go-service/template/   the parameterized copy of go-service/
 ```
+
+The two services stay runnable: they are the reference, and the templates are
+generated copies of them, not a replacement.
+
+## Minting a service
+
+```sh
+make mint DEST=../parts-svc
+```
+
+Copier asks for the service name, description, owner, repo URL, module path,
+environment-variable prefix, ports, and whether to include the two example
+resources. It then runs `git init` and `go mod tidy` and prints what to do
+next. Answers land in `.copier-answers.yml`, and `copier update` inside the
+generated service pulls in later template changes as a three-way merge.
+
+```sh
+make verify   # generate, build, test, lint and boot a service — twice
+```
+
+`make verify` generates with the defaults and again with no examples, a custom
+env prefix and custom ports, because the interesting failures live at the
+answers that are not the defaults.
 
 ## Quick start
 
 ```sh
 make -C go-service run          # :8080, admin :9080
-make -C python-service run      # same ports — run one at a time
+make -C py-service run          # same ports — run one at a time
 ```
 
 Both default to the same ports on purpose: they are the same service. To run
 them side by side, override one:
 
 ```sh
-MINT_SERVER__PORT=8081 MINT_SERVER__ADMIN_PORT=9081 make -C python-service run
+MINT_SERVER__PORT=8081 MINT_SERVER__ADMIN_PORT=9081 make -C py-service run
 ```
 
 ## Commands
@@ -49,7 +75,9 @@ From the repo root, `make test`, `make lint`, `make fmt` and `make build` fan
 out to both.
 
 ```sh
-make compare   # boots both and diffs what they return, request by request
+make compare              # boots both and diffs what they return, request by request
+make mint DEST=../my-svc  # generate a new service from the template
+make verify               # generate, build, test, lint and boot the result
 ```
 
 ## What is guaranteed to match
@@ -148,15 +176,21 @@ Add direnv's hook to your shell, then `direnv allow` in each service directory.
 
 **Built:** config, two log tiers, the error contract, the HTTP transport, health
 endpoints, Prometheus metrics, OpenTelemetry tracing, graceful shutdown,
-OpenAPI 3.1 with Swagger UI, tests, Makefiles, asdf and direnv.
+OpenAPI 3.1 with Swagger UI, tests, Makefiles, asdf and direnv — and the Copier
+template for the Go service, verified end to end by `make verify`.
 
 **Next, in rough order:**
 
-1. **A conformance test** — `scripts/compare.sh` is a script you read the output
+1. **The Python template** — `templates/py-service/template/`, the second
+   `language` choice, and `package_name`. Until it lands, `language` offers Go
+   only.
+2. **Versioning and updates** — repo-wide semver tags, a mint mark in the
+   generated README that names the version it came from, and a documented
+   `copier update` run. The template already writes `.copier-answers.yml`;
+   without tags, generated services track HEAD.
+3. **A conformance test** — `scripts/compare.sh` is a script you read the output
    of, not a test suite. Promoting it to something that runs in CI is a
    deliberate later step.
-2. **Copier templates** — parameterize `service_name`, `module_path` /
-   `package_name`, ports and owner, and move both trees under `templates/`.
 
 **Deliberately not built:** authentication (expected at a gateway; the
 middleware chain has a named empty slot and both services warn at startup when

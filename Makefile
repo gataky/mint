@@ -1,21 +1,26 @@
-# Mint — the top level. These targets fan out to both services.
+# Mint — the top level. Most targets fan out to both reference services; `mint`
+# and `verify` are about the Copier templates under templates/.
 #
 # The per-service targets are the real interface; see go-service/Makefile and
-# python-service/Makefile. Every target below exists in both.
+# py-service/Makefile. Every target below exists in both.
 
 .DEFAULT_GOAL := help
 SHELL := /usr/bin/env bash
 
-SERVICES := go-service python-service
+SERVICES := go-service py-service
 
-.PHONY: help test lint fmt build clean compare run-go run-python
+# Pinned rather than resolved, so two developers minting on different days get
+# the same Copier.
+COPIER := uvx copier@9.17.1
+
+.PHONY: help test lint fmt build clean compare run-go run-py mint verify
 
 help: ## Show this help
 	@printf '\n\033[1mMint\033[0m — one API, two languages\n\n'
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@printf '\nEach service has the same targets:\n'
-	@printf '  make -C go-service help\n  make -C python-service help\n\n'
+	@printf '  make -C go-service help\n  make -C py-service help\n\n'
 
 test: ## Run both services' tests
 	@$(foreach s,$(SERVICES),printf '\n\033[1m== $(s) ==\033[0m\n' && $(MAKE) --no-print-directory -C $(s) test &&) true
@@ -35,8 +40,15 @@ clean: ## Clean both services
 compare: ## Boot both services and diff what they return
 	@./scripts/compare.sh
 
+mint: ## Mint a new service from the template (DEST=../my-svc)
+	@test -n "$(DEST)" || { echo "usage: make mint DEST=../my-svc"; exit 1; }
+	@$(COPIER) copy --trust . "$(DEST)"
+
+verify: ## Generate from the template, then build, test, lint and boot it
+	@./scripts/verify-template.sh
+
 run-go: ## Boot the Go service
 	@$(MAKE) --no-print-directory -C go-service run
 
-run-python: ## Boot the Python service
-	@$(MAKE) --no-print-directory -C python-service run
+run-py: ## Boot the Python service
+	@$(MAKE) --no-print-directory -C py-service run

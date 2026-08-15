@@ -70,7 +70,7 @@ MINT_SERVER__PORT=$GO_PORT MINT_SERVER__ADMIN_PORT=$GO_ADMIN MINT_LOGGING__FORMA
 	"$TMP/widget-svc" >"$TMP/go.log" 2>&1 &
 GO_PID=$!
 
-(cd python-service && MINT_SERVER__PORT=$PY_PORT MINT_SERVER__ADMIN_PORT=$PY_ADMIN \
+(cd py-service && MINT_SERVER__PORT=$PY_PORT MINT_SERVER__ADMIN_PORT=$PY_ADMIN \
 	MINT_LOGGING__FORMAT=json uv run python -m widget_svc >"$TMP/py.log" 2>&1) &
 PY_PID=$!
 
@@ -251,7 +251,7 @@ fi
 
 banner "make help"
 go_targets=$(make -C go-service help | grep -oE '^  [a-z-]+' | tr -d ' ' | sort)
-py_targets=$(make -C python-service help | grep -oE '^  [a-z-]+' | tr -d ' ' | sort)
+py_targets=$(make -C py-service help | grep -oE '^  [a-z-]+' | tr -d ' ' | sort)
 if [[ "$go_targets" == "$py_targets" ]]; then
 	printf '  \033[32m✓\033[0m the two Makefiles expose the same targets\n'
 else
@@ -262,7 +262,7 @@ fi
 
 banner "config"
 go_config=$(cd go-service && make --no-print-directory config | sed 's/#.*//' | sed 's/[[:space:]]*$//')
-py_config=$(cd python-service && make --no-print-directory config | sed 's/#.*//' | sed 's/[[:space:]]*$//')
+py_config=$(cd py-service && make --no-print-directory config | sed 's/#.*//' | sed 's/[[:space:]]*$//')
 if [[ "$go_config" == "$py_config" ]]; then
 	printf '  \033[32m✓\033[0m effective config is identical\n'
 else
