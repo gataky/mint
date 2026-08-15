@@ -84,14 +84,25 @@ func run() error {
 		return fmt.Errorf("build metrics: %w", err)
 	}
 
+	tracing, err := observability.NewTracing(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("build tracing: %w", err)
+	}
+	logger.InfoContext(ctx, "tracing configured",
+		slog.Bool("enabled", cfg.Observability.Tracing.Enabled),
+		slog.Bool("exporting", tracing.Exporting),
+		slog.Float64("sample_ratio", cfg.Observability.Tracing.SampleRatio),
+	)
+
 	apiMux := transport.NewAPI(cfg, widgets, logger)
+	resolve := transport.MuxResolver(apiMux)
 	api := transport.Chain(
 		apiMux,
 		transport.Recovery(logger),
 		transport.RequestContext(),
-		// tracing belongs here, outside metrics and logging.
-		transport.Metrics(metrics, transport.MuxResolver(apiMux)),
-		transport.Logging(logger, transport.MuxResolver(apiMux)),
+		transport.Tracing(cfg.Service.Name, resolve),
+		transport.Metrics(metrics, resolve),
+		transport.Logging(logger, resolve),
 		// auth belongs here: after observation, before execution.
 		transport.Timeout(cfg.Server.RequestTimeout),
 	)
@@ -105,5 +116,21 @@ func run() error {
 		transport.RequestContext(),
 	)
 
-	return transport.Serve(ctx, logger, cfg.Server, health, transport.Listeners(cfg, api, admin)...)
+	serveErr := transport.Serve(ctx, logger, cfg.Server, health, transport.Listeners(cfg, api, admin)...)
+
+	// Flush after the drain and before the process exits. The spans for the
+	// last requests served are still in the batcher's queue and are silently
+	// lost otherwise. ctx is already cancelled by the signal, so the flush gets
+	// a fresh deadline of its own.
+	flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cfg.Server.ShutdownTimeout)
+	defer cancel()
+	if err := tracing.Shutdown(flushCtx); err != nil {
+		logger.ErrorContext(flushCtx, "tracer provider did not flush cleanly",
+			slog.String("error", err.Error()))
+		if serveErr == nil {
+			serveErr = fmt.Errorf("flush tracer: %w", err)
+		}
+	}
+
+	return serveErr
 }

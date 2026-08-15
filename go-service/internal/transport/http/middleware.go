@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/jeffmgreg/widget-svc/internal/logging"
 	"github.com/jeffmgreg/widget-svc/internal/observability"
@@ -110,6 +111,33 @@ func RequestContext() Middleware {
 			ctx = context.WithValue(ctx, pathKey{}, r.URL.Path)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
+	}
+}
+
+// Tracing starts a server span per request and extracts any inbound trace
+// context, so a trace begun by a caller continues here rather than restarting.
+//
+// otelhttp does the W3C extraction, the semantic-convention attributes and the
+// status mapping. What it cannot do on its own is name the span usefully: its
+// default is the handler name it was given, which would be one value for every
+// route. The span name is the route template, which is the convention
+// (`{method} {route}`) and matches the metrics label.
+func Tracing(service string, resolve RouteResolver) Middleware {
+	return func(next http.Handler) http.Handler {
+		return otelhttp.NewHandler(next, service,
+			otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
+				return r.Method + " " + resolve(r)
+			}),
+			// Health checks and scrapes would otherwise be most of the spans.
+			otelhttp.WithFilter(func(r *http.Request) bool {
+				switch r.URL.Path {
+				case "/healthz", "/readyz", "/metrics":
+					return false
+				default:
+					return true
+				}
+			}),
+		)
 	}
 }
 

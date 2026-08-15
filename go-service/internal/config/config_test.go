@@ -194,3 +194,67 @@ func TestSplitListeners(t *testing.T) {
 		t.Error("SplitListeners() = true when admin_port equals port, want false")
 	}
 }
+
+func TestOTLPEndpointFallsBackToTheEcosystemVariable(t *testing.T) {
+	// Mint defers on OTLP *transport*: an operator who has already set the
+	// standard variable should not have to set a second one.
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector:4318")
+
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if got := loaded.Config.Observability.Tracing.OTLPEndpoint; got != "http://collector:4318" {
+		t.Errorf("otlp_endpoint = %q, want the OTEL_ variable's value", got)
+	}
+
+	var out bytes.Buffer
+	if err := loaded.Print(&out); err != nil {
+		t.Fatalf("Print failed: %v", err)
+	}
+	// It still has to say where it came from.
+	if !strings.Contains(out.String(), "env:OTEL_EXPORTER_OTLP_ENDPOINT") {
+		t.Errorf("Print does not attribute the endpoint to OTEL_EXPORTER_OTLP_ENDPOINT:\n%s", out.String())
+	}
+}
+
+func TestMintVariableBeatsTheEcosystemVariable(t *testing.T) {
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://ecosystem:4318")
+	t.Setenv("MINT_OBSERVABILITY__TRACING__OTLP_ENDPOINT", "http://explicit:4318")
+
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	// The fallback is a fallback, not an override.
+	if got := loaded.Config.Observability.Tracing.OTLPEndpoint; got != "http://explicit:4318" {
+		t.Errorf("otlp_endpoint = %q, want the MINT_ variable to win", got)
+	}
+}
+
+func TestServiceIdentityEnvironmentVariablesAreIgnored(t *testing.T) {
+	// Mint owns identity. Logs and spans disagreeing about service or env would
+	// break the error-to-trace path.
+	t.Setenv("OTEL_SERVICE_NAME", "something-else")
+	t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "service.name=something-else")
+
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if got := loaded.Config.Service.Name; got != Defaults().Service.Name {
+		t.Errorf("service.name = %q, want the default %q", got, Defaults().Service.Name)
+	}
+}
+
+func TestSampleRatioIsValidated(t *testing.T) {
+	cfg := Defaults()
+	cfg.Observability.Tracing.SampleRatio = 1.5
+
+	if err := cfg.Validate(); err == nil {
+		t.Error("Validate accepted a sample_ratio above 1.0")
+	}
+}

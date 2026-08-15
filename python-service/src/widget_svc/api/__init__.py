@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import FastAPI, Response
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from starlette.middleware import Middleware
 
 from widget_svc.api import health as health_routes
@@ -58,6 +59,24 @@ def create_api(config: Config, service: Widgets, metrics: Metrics | None = None)
     app.state.widgets = service
     app.include_router(widgets.router)
     problem.install(app)
+
+    # Adds OpenTelemetryMiddleware at the outside of the stack, so the spans it
+    # starts are visible to the metrics and access-log middleware within.
+    # Span names come from the route template, matching the metrics label and
+    # the Go service's span names.
+    #
+    # This is always installed: when tracing is disabled the global provider is
+    # a no-op and no spans are recorded, which is cheaper than branching here.
+    FastAPIInstrumentor.instrument_app(
+        app,
+        # Without this the ASGI instrumentation emits an "http send" and an
+        # "http receive" child span per request, describing the ASGI protocol
+        # rather than anything a reader of the trace cares about. The Go service
+        # produces one server span per request; this makes the exported traces
+        # comparable.
+        exclude_spans=["receive", "send"],
+    )
+
     return app
 
 

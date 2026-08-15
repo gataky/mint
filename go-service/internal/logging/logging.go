@@ -11,11 +11,12 @@
 // Every line carries: timestamp, level, msg, service, service_version, env.
 // Request-scoped lines add request_id.
 //
-// When tracing lands, trace_id and span_id join that list — taken from the
-// active span on the context, and omitted entirely when there is no span,
-// never empty and never fabricated. That is why the logger is reached through
-// the context (see FromContext) and why call sites use the *Context variants of
-// slog's methods.
+// A line emitted inside a span also carries trace_id and span_id. They are
+// taken from the active span on the context and omitted entirely when there is
+// none — never empty and never fabricated, because an empty trace_id looks like
+// a trace that exists and cannot be found. That is why the logger is reached
+// through the context (see FromContext) and why call sites use the *Context
+// variants of slog's methods.
 package logging
 
 import (
@@ -27,6 +28,7 @@ import (
 	"time"
 
 	"github.com/lmittmann/tint"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Reserved field names. Call sites cannot override these; they are set once,
@@ -39,6 +41,8 @@ const (
 	KeyServiceVersion = "service_version"
 	KeyEnv            = "env"
 	KeyRequestID      = "request_id"
+	KeyTraceID        = "trace_id"
+	KeySpanID         = "span_id"
 )
 
 // TimeFormat is the timestamp layout in the console tier. The JSON tier uses
@@ -83,11 +87,40 @@ func New(opts Options) *slog.Logger {
 		})
 	}
 
-	return slog.New(handler).With(
+	return slog.New(&traceHandler{Handler: handler}).With(
 		slog.String(KeyService, opts.Service),
 		slog.String(KeyServiceVersion, opts.ServiceVersion),
 		slog.String(KeyEnv, opts.Env),
 	)
+}
+
+// traceHandler adds trace_id and span_id from the active span.
+//
+// Doing it in the handler rather than at call sites is what makes the
+// correlation automatic: any code that logs with a context gets the fields, and
+// no call site can forget them.
+//
+// **The fields are omitted entirely when there is no span** — never empty,
+// never fabricated. An empty trace_id in an aggregator is worse than an absent
+// one: it looks like a trace that exists and cannot be found.
+type traceHandler struct{ slog.Handler }
+
+func (h *traceHandler) Handle(ctx context.Context, record slog.Record) error {
+	if spanCtx := trace.SpanContextFromContext(ctx); spanCtx.IsValid() {
+		record.AddAttrs(
+			slog.String(KeyTraceID, spanCtx.TraceID().String()),
+			slog.String(KeySpanID, spanCtx.SpanID().String()),
+		)
+	}
+	return h.Handler.Handle(ctx, record)
+}
+
+func (h *traceHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &traceHandler{Handler: h.Handler.WithAttrs(attrs)}
+}
+
+func (h *traceHandler) WithGroup(name string) slog.Handler {
+	return &traceHandler{Handler: h.Handler.WithGroup(name)}
 }
 
 // replaceAttr maps slog's built-in keys onto the shared field names, renders

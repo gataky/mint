@@ -57,8 +57,8 @@ clean: ## Remove build artifacts
 # convention about the output stream, not service configuration.
 .PHONY: lint-config-discipline
 lint-config-discipline:
-	@if grep -rn --include='*.go' -E 'os\.(Getenv|LookupEnv|Environ)' \
-		--exclude-dir=internal/config . \
+	@if grep -rn --include='*.go' -E 'os\.(Getenv|LookupEnv|Environ)' . \
+		| grep -v '^\./internal/config/' \
 		| grep -v '_test\.go' \
 		| grep -v 'internal/logging/logging.go.*NO_COLOR'; then \
 		echo ""; \

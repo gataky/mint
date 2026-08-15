@@ -87,12 +87,19 @@ huma.Register(api, huma.Operation{
 - **Don't re-enable huma's schema-link transformer.** It injects `$schema` into
   every response body, which the Python service does not emit.
 
+- **Don't build a tracer provider outside `internal/observability`.** It is
+  installed globally once, at startup, by the composition root.
+- **Don't skip `tracing.Shutdown` on exit.** The spans for the last requests
+  served are still in the batcher's queue and vanish silently otherwise.
+
 ## Keeping the two services identical
 
 What must match is the outside contract: route paths, status codes, the
 `problem+json` body shape, log field names, config precedence and env var
-names, and the `make help` target list. There is no automated check for this
-yet — changing one service means changing the other by hand.
+names, metric names and label keys, span names, and the `make help` target
+list. `make compare` from the repo root boots both and diffs all of it, but
+nothing runs it for you — changing one service means changing the other by
+hand.
 
 What deliberately does *not* have to match: internal package layout, error
 message wording, JSON key order, and test names. Each language does what is

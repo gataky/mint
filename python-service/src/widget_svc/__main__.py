@@ -26,7 +26,7 @@ from widget_svc.api.health import Health
 from widget_svc.config import Config
 from widget_svc.log import configure as configure_logging
 from widget_svc.log import logger
-from widget_svc.observability import Metrics
+from widget_svc.observability import Metrics, configure_tracing
 from widget_svc.service import Widgets
 
 
@@ -82,6 +82,14 @@ def main(argv: list[str] | None = None) -> int:
             expectation="authentication is handled by an upstream gateway or mesh",
         )
 
+    tracing = configure_tracing(config)
+    logger.info(
+        "tracing configured",
+        enabled=config.observability.tracing.enabled,
+        exporting=tracing.exporting,
+        sample_ratio=config.observability.tracing.sample_ratio,
+    )
+
     widgets = Widgets()
     health = Health()
     metrics = Metrics(config)
@@ -91,6 +99,11 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:
         logger.opt(exception=exc).error("fatal")
         return 1
+    finally:
+        # After the drain, before the process exits. The spans for the last
+        # requests served are still queued in the batch processor and are
+        # silently lost otherwise.
+        tracing.shutdown()
     return 0
 
 
@@ -189,9 +202,6 @@ async def serve(config: Config, to_run: list[Listener], health: Health) -> None:
 
     for task in done:
         task.result()  # re-raise anything a listener failed with
-
-    # When tracing lands, the tracer provider is flushed here — after the drain,
-    # before the process exits. Final-request spans are lost otherwise.
 
 
 if __name__ == "__main__":

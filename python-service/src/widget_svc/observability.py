@@ -10,6 +10,20 @@ gauge report one worker's view rather than the process group's.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
+from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.propagate import set_global_textmap
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
+from opentelemetry.sdk.trace.export import (
+    BatchSpanProcessor,
+    SpanExporter,
+    SpanExportResult,
+)
+from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 from prometheus_client import (
     CollectorRegistry,
     Counter,
@@ -130,3 +144,92 @@ class Metrics:
     def render(self) -> bytes:
         """The Prometheus exposition format, for the /metrics endpoint."""
         return generate_latest(self.registry)
+
+
+class Tracing:
+    """Owns the tracer provider and knows how to shut it down."""
+
+    def __init__(self, provider: TracerProvider | None, *, exporting: bool) -> None:
+        self.provider = provider
+        self.exporting = exporting
+
+    def shutdown(self) -> None:
+        """Flush and stop the tracer provider.
+
+        This must run after the drain and before the process exits: the spans
+        for the last requests served sit in the batch processor's queue, and are
+        silently lost otherwise.
+        """
+        if self.provider is not None:
+            self.provider.shutdown()
+
+
+def configure_tracing(config: Config) -> Tracing:
+    """Build the tracer provider and install it globally.
+
+    **A real provider is installed even with no collector configured.** The
+    exporter is what becomes a no-op, not the tracer: spans are still created,
+    so every log line still carries a trace_id and a request can still be
+    followed through the logs — while a fresh ``make run`` emits no
+    connection-refused retries. Disabling the tracer instead would silently drop
+    trace_id from the logs, which is the thing most worth having locally.
+    """
+    if not config.observability.tracing.enabled:
+        # Explicitly off. No spans at all, so no trace_id anywhere.
+        set_global_textmap(TraceContextTextMapPropagator())
+        return Tracing(None, exporting=False)
+
+    # Mint owns identity. OTEL_SERVICE_NAME and OTEL_RESOURCE_ATTRIBUTES are
+    # deliberately not consulted: logs and spans disagreeing about service or
+    # env would break the error-to-trace path.
+    resource = Resource(
+        attributes={
+            "service.name": config.service.name,
+            "service.version": config.service.version,
+            "service.owner": config.service.owner,
+            "deployment.environment.name": config.env,
+        }
+    )
+
+    exporter, exporting = _span_exporter(config.observability.tracing.otlp_endpoint)
+    provider = TracerProvider(
+        resource=resource,
+        # ParentBased so an upstream sampling decision is respected; the ratio
+        # applies only to traces this service starts.
+        sampler=ParentBased(TraceIdRatioBased(config.observability.tracing.sample_ratio)),
+    )
+    provider.add_span_processor(BatchSpanProcessor(exporter))
+
+    trace.set_tracer_provider(provider)
+    # W3C trace context, so a trace survives the hop between services
+    # regardless of which language each one is written in.
+    set_global_textmap(TraceContextTextMapPropagator())
+
+    return Tracing(provider, exporting=exporting)
+
+
+def _span_exporter(endpoint: str) -> tuple[SpanExporter, bool]:
+    """Return the span exporter and whether it actually exports."""
+    if not endpoint.strip():
+        return _DiscardExporter(), False
+    return OTLPSpanExporter(endpoint=f"{endpoint.rstrip('/')}/v1/traces"), True
+
+
+class _DiscardExporter(SpanExporter):
+    """Accepts spans and drops them.
+
+    Used when no collector is configured, so that spans — and therefore trace
+    IDs on log lines — still exist locally without anything trying to reach the
+    network.
+    """
+
+    # The argument names are fixed by the SpanExporter interface and callers
+    # may pass them by keyword, so they are kept rather than underscored.
+    def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:  # noqa: ARG002
+        return SpanExportResult.SUCCESS
+
+    def shutdown(self) -> None:
+        return None
+
+    def force_flush(self, timeout_millis: int = 30_000) -> bool:  # noqa: ARG002
+        return True

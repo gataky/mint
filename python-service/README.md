@@ -175,9 +175,43 @@ needs `PROMETHEUS_MULTIPROC_DIR` and `multiprocess_mode="livesum"`; without
 them, more than one uvicorn worker makes the in-flight gauge report one worker's
 view rather than the process group's.
 
+## Tracing
+
+OpenTelemetry, wired only in `observability.py`.
+
+- **A real tracer provider is installed even with no collector configured.**
+  The *exporter* becomes a no-op, not the tracer: spans are still created, so
+  every log line still carries a `trace_id`, while a fresh `make run` emits no
+  connection-refused retries.
+- With `observability.tracing.otlp_endpoint` set, spans are exported over
+  OTLP/HTTP.
+- Span names are `{method} {route}` — the route template, matching the
+  metrics label.
+- W3C trace context is propagated, so an inbound `traceparent` continues the
+  caller's trace rather than starting a new one.
+- **The provider is flushed on shutdown**, after the drain. The spans for the
+  last requests served are still queued and are silently lost otherwise.
+- `/healthz`, `/readyz` and `/metrics` are not traced.
+
+`trace_id` and `span_id` are added by a loguru patcher rather than at call sites, and are **omitted entirely when there
+is no span** — never empty, never fabricated. An empty `trace_id` in an
+aggregator is worse than an absent one: it looks like a trace that exists and
+cannot be found.
+
+**Mint owns identity and defers on transport.** `OTEL_SERVICE_NAME` and
+`OTEL_RESOURCE_ATTRIBUTES` are deliberately ignored — logs and spans disagreeing
+about `service` or `env` would break the error-to-trace path. The one ecosystem
+variable honoured is `OTEL_EXPORTER_OTLP_ENDPOINT`, read as an explicitly
+enumerated fallback inside `observability.py` when `otlp_endpoint` is unset, so
+`make config` still names its source.
+
+The ASGI instrumentation is installed with `exclude_spans=["receive", "send"]`.
+Without it, every request also produces an `http send` and an `http receive`
+child span describing the ASGI protocol rather than anything a reader of the
+trace cares about — and the Go service emits one server span per request.
+
 ## Not built yet
 
-OpenTelemetry tracing and a generated `llms.txt`. The seams are in place:
-handlers and service methods are `async`, request-scoped log fields ride on
-contextvars (which is what OTel uses), and the middleware chain has a named
-empty slot for tracing outside metrics and logging.
+A generated `llms.txt`, and Copier templating. Authentication is deliberately
+deferred to a gateway: the middleware chain has a named empty slot for it, and
+the service warns at startup when `env != local` and none is registered.

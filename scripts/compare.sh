@@ -190,6 +190,40 @@ else
 	failures=$((failures + 1))
 fi
 
+banner "tracing"
+# A caller's trace must continue through both services rather than a new one
+# starting, or a distributed trace breaks at every service boundary.
+TRACEPARENT_ID="4bf92f3577b34da6a3ce929d0e0e4736"
+for base in "http://localhost:$GO_PORT" "http://localhost:$PY_PORT"; do
+	curl -sS "$base/widgets" \
+		-H "traceparent: 00-$TRACEPARENT_ID-00f067aa0ba902b7-01" >/dev/null
+done
+sleep 0.5
+
+read -r -d '' FIND_TRACE <<'PYEOF'
+import json, sys
+wanted = sys.argv[2]
+for line in open(sys.argv[1]):
+    try:
+        event = json.loads(line)
+    except ValueError:
+        continue
+    if event.get("msg") == "request" and event.get("trace_id") == wanted:
+        print("continued")
+        break
+else:
+    print("NOT FOUND")
+PYEOF
+
+go_trace=$(python3 -c "$FIND_TRACE" "$TMP/go.log" "$TRACEPARENT_ID")
+py_trace=$(python3 -c "$FIND_TRACE" "$TMP/py.log" "$TRACEPARENT_ID")
+if [[ "$go_trace" == "continued" && "$py_trace" == "continued" ]]; then
+	printf '  \033[32m✓\033[0m inbound traceparent is continued (go=%s python=%s)\n' "$go_trace" "$py_trace"
+else
+	printf '  \033[31m✗\033[0m inbound traceparent (go=%s python=%s)\n' "$go_trace" "$py_trace"
+	failures=$((failures + 1))
+fi
+
 banner "logs"
 go_keys=$(python3 -c '
 import json, sys

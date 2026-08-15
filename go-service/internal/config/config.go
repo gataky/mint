@@ -35,12 +35,46 @@ import (
 // EnvPrefix is the required prefix on every configuration environment variable.
 const EnvPrefix = "MINT_"
 
+const (
+	otlpEndpointKey = "observability.tracing.otlp_endpoint"
+
+	// otlpEndpointEnv is the single exception to the MINT_ prefix rule. It is
+	// enumerated explicitly — never read as a wildcard OTEL_* lookup — so that
+	// every value reaching the config still has one named source.
+	otlpEndpointEnv = "OTEL_EXPORTER_OTLP_ENDPOINT"
+)
+
 // Config is the whole of the service's configuration.
 type Config struct {
-	Env     string  `koanf:"env"`
-	Service Service `koanf:"service"`
-	Server  Server  `koanf:"server"`
-	Logging Logging `koanf:"logging"`
+	Env           string        `koanf:"env"`
+	Service       Service       `koanf:"service"`
+	Server        Server        `koanf:"server"`
+	Logging       Logging       `koanf:"logging"`
+	Observability Observability `koanf:"observability"`
+}
+
+// Observability configures tracing. Metrics need no configuration: they are
+// always collected and always served on the admin port.
+type Observability struct {
+	Tracing Tracing `koanf:"tracing"`
+}
+
+// Tracing configures the OpenTelemetry tracer provider.
+type Tracing struct {
+	// Enabled turns span creation off entirely. When false there is no trace
+	// context, so log lines carry no trace_id.
+	Enabled bool `koanf:"enabled"`
+
+	// OTLPEndpoint is the collector to export to, e.g. http://localhost:4318.
+	// Empty installs a no-op exporter: spans are still created, so logs still
+	// correlate, but nothing leaves the process and a fresh `make run` emits no
+	// connection-refused retries.
+	OTLPEndpoint string `koanf:"otlp_endpoint"`
+
+	// SampleRatio is the head sampling ratio, 0.0 to 1.0, applied only to
+	// traces this service starts. A sampling decision made upstream is
+	// respected.
+	SampleRatio float64 `koanf:"sample_ratio"`
 }
 
 // Service identifies this service to logs, traces and metrics.
@@ -104,6 +138,13 @@ func Defaults() Config {
 		Logging: Logging{
 			Level:  "info",
 			Format: "console",
+		},
+		Observability: Observability{
+			Tracing: Tracing{
+				Enabled:      true,
+				OTLPEndpoint: "",
+				SampleRatio:  1.0,
+			},
 		},
 	}
 }
@@ -173,6 +214,26 @@ func Load(files ...string) (*Loaded, error) {
 		sources[key] = "env:" + envNames[key]
 	}
 
+	// Layer 3b: the one ecosystem variable this service honours.
+	//
+	// Mint defers on OTLP *transport* and owns *identity*: OTEL_SERVICE_NAME
+	// and OTEL_RESOURCE_ATTRIBUTES are deliberately ignored, because logs and
+	// spans disagreeing about `service` or `env` would break the error-to-trace
+	// path. Reading it here rather than in the observability package keeps the
+	// one-reader rule and keeps `make config` honest about where a value came
+	// from.
+	//
+	// "Unset" means empty, not absent: the defaults layer always supplies this
+	// key, so k.Exists is true even when nobody has chosen a value.
+	if k.String(otlpEndpointKey) == "" {
+		if endpoint := os.Getenv(otlpEndpointEnv); endpoint != "" {
+			if err := k.Set(otlpEndpointKey, endpoint); err != nil {
+				return nil, fmt.Errorf("apply %s: %w", otlpEndpointEnv, err)
+			}
+			sources[otlpEndpointKey] = "env:" + otlpEndpointEnv
+		}
+	}
+
 	var cfg Config
 	if err := k.Unmarshal("", &cfg); err != nil {
 		return nil, fmt.Errorf("decode config: %w", err)
@@ -223,6 +284,10 @@ func (c Config) Validate() error {
 		if d.value <= 0 {
 			problems = append(problems, fmt.Errorf("%s: must be greater than zero", d.name))
 		}
+	}
+
+	if ratio := c.Observability.Tracing.SampleRatio; ratio < 0 || ratio > 1 {
+		problems = append(problems, fmt.Errorf("observability.tracing.sample_ratio: %v is outside 0.0-1.0", ratio))
 	}
 
 	if len(problems) == 0 {

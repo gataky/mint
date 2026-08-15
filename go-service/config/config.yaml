@@ -40,3 +40,16 @@ logging:
   level: info
   # console (colorized, for a human) | json (one object per line)
   format: console
+
+observability:
+  tracing:
+    # Spans are always created when enabled, so every log line carries a
+    # trace_id. With no otlp_endpoint they are dropped rather than exported, so
+    # a fresh `make run` emits no connection-refused retries.
+    enabled: true
+    # e.g. http://localhost:4318 for an OTLP/HTTP collector or Jaeger.
+    # Falls back to OTEL_EXPORTER_OTLP_ENDPOINT when unset.
+    otlp_endpoint: ""
+    # Head sampling ratio for traces this service starts, 0.0 to 1.0. An
+    # upstream sampling decision is always respected.
+    sample_ratio: 1.0

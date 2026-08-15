@@ -13,10 +13,12 @@ An aggregator parses JSON; it does not care about key order or whitespace. Every
 line carries ``timestamp``, ``level``, ``msg``, ``service``, ``service_version``
 and ``env``. Request-scoped lines add ``request_id``.
 
+A line emitted inside a span also carries ``trace_id`` and ``span_id``, added by
+a patcher rather than by call sites, and omitted entirely when there is no span.
+
 Request-scoped fields ride on ``logger.contextualize``, which is contextvar
-based. No logger has to be threaded through call signatures, and the same
-mechanism is what OpenTelemetry uses — so ``trace_id`` and ``span_id`` will join
-the set without touching a single call site.
+based — the same mechanism OpenTelemetry uses. No logger has to be threaded
+through call signatures.
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, TextIO
 
 from loguru import logger
+from opentelemetry import trace
 
 if TYPE_CHECKING:
     # loguru exports these from its stub only; they do not exist at runtime.
@@ -44,6 +47,8 @@ KEY_SERVICE = "service"
 KEY_SERVICE_VERSION = "service_version"
 KEY_ENV = "env"
 KEY_REQUEST_ID = "request_id"
+KEY_TRACE_ID = "trace_id"
+KEY_SPAN_ID = "span_id"
 
 #: loguru's level names are not slog's. The *value* of the level field is
 #: something an aggregator queries on, so it is normalised rather than left to
@@ -74,12 +79,15 @@ def configure(
     logger.remove()
 
     # These ride on every line, including ones emitted before any request.
+    # The patcher adds the trace fields to every record, so no call site can
+    # forget them.
     logger.configure(
         extra={
             KEY_SERVICE: service,
             KEY_SERVICE_VERSION: service_version,
             KEY_ENV: env,
-        }
+        },
+        patcher=_add_trace_fields,
     )
 
     if fmt == "json":
@@ -99,6 +107,22 @@ def configure(
             # redirected file whenever colorize is forced on.
             colorize=_use_colour(out),
         )
+
+
+def _add_trace_fields(record: Record) -> None:
+    """Add trace_id and span_id from the active span.
+
+    **The fields are omitted entirely when there is no span** — never empty,
+    never fabricated. An empty trace_id in an aggregator is worse than an absent
+    one: it looks like a trace that exists and cannot be found.
+    """
+    context = trace.get_current_span().get_span_context()
+    if not context.is_valid:
+        return
+
+    # Hex, zero-padded, matching the Go service and the W3C traceparent format.
+    record["extra"][KEY_TRACE_ID] = format(context.trace_id, "032x")
+    record["extra"][KEY_SPAN_ID] = format(context.span_id, "016x")
 
 
 def level_name(loguru_level: str) -> str:

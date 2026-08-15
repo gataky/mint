@@ -37,6 +37,17 @@ ENV_PREFIX = "MINT_"
 # Where config files are looked for, in increasing order of precedence.
 CONFIG_FILES = (Path("config/config.yaml"), Path("config/config.local.yaml"))
 
+OTLP_ENDPOINT_KEY = "observability.tracing.otlp_endpoint"
+
+#: The single exception to the MINT_ prefix rule. It is enumerated explicitly —
+#: never read as a wildcard OTEL_* lookup — so every value reaching the config
+#: still has one named source.
+#:
+#: Mint defers on OTLP *transport* and owns *identity*: OTEL_SERVICE_NAME and
+#: OTEL_RESOURCE_ATTRIBUTES are deliberately ignored, because logs and spans
+#: disagreeing about ``service`` or ``env`` would break the error-to-trace path.
+OTLP_ENDPOINT_ENV = "OTEL_EXPORTER_OTLP_ENDPOINT"
+
 _DURATION_PATTERN = re.compile(r"(\d+(?:\.\d+)?)(ms|s|m|h)")
 _DURATION_UNITS = {"ms": 0.001, "s": 1.0, "m": 60.0, "h": 3600.0}
 
@@ -124,6 +135,34 @@ class Logging(BaseSettings):
     format: LogFormat = "console"
 
 
+class Tracing(BaseSettings):
+    """The OpenTelemetry tracer provider."""
+
+    #: Turns span creation off entirely. When false there is no trace context,
+    #: so log lines carry no trace_id.
+    enabled: bool = True
+
+    #: The collector to export to, e.g. http://localhost:4318. Empty installs a
+    #: no-op exporter: spans are still created, so logs still correlate, but
+    #: nothing leaves the process and a fresh `make run` emits no
+    #: connection-refused retries.
+    otlp_endpoint: str = ""
+
+    #: Head sampling ratio, applied only to traces this service starts. A
+    #: sampling decision made upstream is respected.
+    sample_ratio: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
+class Observability(BaseSettings):
+    """Tracing configuration.
+
+    Metrics need none: they are always collected and always served on the admin
+    port.
+    """
+
+    tracing: Tracing = Tracing()
+
+
 class Config(BaseSettings):
     """The whole of the service's configuration.
 
@@ -147,6 +186,7 @@ class Config(BaseSettings):
     service: Service = Service()
     server: Server = Server()
     logging: Logging = Logging()
+    observability: Observability = Observability()
 
     #: Set by :func:`load`; records which source supplied each key.
     sources: ClassVar[dict[str, str]] = {}
@@ -230,7 +270,17 @@ def load(files: tuple[Path, ...] | None = None) -> Config:
             return (init_settings, env_settings, YamlSource(settings_cls, paths))
 
     config = _Config()
-    Config.sources = _resolve_sources(paths)
+    sources = _resolve_sources(paths)
+
+    # The one ecosystem variable this service honours. "Unset" means empty, not
+    # absent: the model always supplies a default for this key, so there is no
+    # "missing" state to test for.
+    endpoint = os.environ.get(OTLP_ENDPOINT_ENV, "")
+    if not config.observability.tracing.otlp_endpoint and endpoint:
+        config.observability.tracing.otlp_endpoint = endpoint
+        sources[OTLP_ENDPOINT_KEY] = f"env:{OTLP_ENDPOINT_ENV}"
+
+    Config.sources = sources
     return config
 
 
@@ -280,16 +330,30 @@ def render(config: Config) -> str:
     every call site.
     """
     dumped = config.model_dump(mode="json")
-    flat = {key: _lookup(dumped, key) for key in _flatten(dumped)}
+    flat = {key: _render_value(_lookup(dumped, key)) for key in _flatten(dumped)}
 
     width = max(len(key) for key in flat)
-    value_width = max(len(str(value)) for value in flat.values())
+    value_width = max(len(value) for value in flat.values())
 
     lines = []
     for key in sorted(flat):
         source = Config.sources.get(key, "default")
-        lines.append(f"{key:<{width}}  {flat[key]!s:<{value_width}}  # {source}")
+        lines.append(f"{key:<{width}}  {flat[key]:<{value_width}}  # {source}")
     return "\n".join(lines)
+
+
+def _render_value(value: Any) -> str:
+    """Render one value the way the Go service renders it.
+
+    Python would otherwise print ``True`` where Go prints ``true``, and ``1.0``
+    where Go prints ``1``. `make config` output is read side by side often
+    enough for that to be worth a few lines.
+    """
+    if isinstance(value, bool):  # before int: bool is a subclass of int
+        return "true" if value else "false"
+    if isinstance(value, float):
+        return f"{value:g}"
+    return str(value)
 
 
 def _lookup(mapping: dict[str, Any], dotted: str) -> Any:

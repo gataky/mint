@@ -89,12 +89,22 @@ async def delete_widget(
   matches in registration order, unlike Go's ServeMux, so `/widgets/search`
   must come before `/widgets/{id}` or it is swallowed.
 
+- **Don't build a tracer provider outside `observability.py`.** It is installed
+  globally once, at startup, by the composition root.
+- **Don't skip `tracing.shutdown()` on exit.** The spans for the last requests
+  served are still in the batch processor's queue and vanish silently otherwise.
+- **Don't drop `exclude_spans=["receive", "send"]`** from the FastAPI
+  instrumentation. Without it every request emits two extra ASGI-protocol child
+  spans the Go service does not produce.
+
 ## Keeping the two services identical
 
 What must match is the outside contract: route paths, status codes, the
 `problem+json` body shape, log field names, config precedence and env var
-names, and the `make help` target list. There is no automated check for this
-yet — changing one service means changing the other by hand.
+names, metric names and label keys, span names, and the `make help` target
+list. `make compare` from the repo root boots both and diffs all of it, but
+nothing runs it for you — changing one service means changing the other by
+hand.
 
 What deliberately does *not* have to match: internal module layout, error
 message wording, JSON key order, and test names. Each language does what is

@@ -155,9 +155,38 @@ identity of every series and break `rate()` across the boundary.
 The admin surface is not instrumented: a readiness probe every second and a
 scrape every fifteen would be most of the metrics.
 
+## Tracing
+
+OpenTelemetry, wired only in `internal/observability`.
+
+- **A real tracer provider is installed even with no collector configured.**
+  The *exporter* becomes a no-op, not the tracer: spans are still created, so
+  every log line still carries a `trace_id`, while a fresh `make run` emits no
+  connection-refused retries.
+- With `observability.tracing.otlp_endpoint` set, spans are exported over
+  OTLP/HTTP.
+- Span names are `{method} {route}` — the route template, matching the
+  metrics label.
+- W3C trace context is propagated, so an inbound `traceparent` continues the
+  caller's trace rather than starting a new one.
+- **The provider is flushed on shutdown**, after the drain. The spans for the
+  last requests served are still queued and are silently lost otherwise.
+- `/healthz`, `/readyz` and `/metrics` are not traced.
+
+`trace_id` and `span_id` are added by a `slog.Handler` wrapper rather than at call sites, and are **omitted entirely when there
+is no span** — never empty, never fabricated. An empty `trace_id` in an
+aggregator is worse than an absent one: it looks like a trace that exists and
+cannot be found.
+
+**Mint owns identity and defers on transport.** `OTEL_SERVICE_NAME` and
+`OTEL_RESOURCE_ATTRIBUTES` are deliberately ignored — logs and spans disagreeing
+about `service` or `env` would break the error-to-trace path. The one ecosystem
+variable honoured is `OTEL_EXPORTER_OTLP_ENDPOINT`, read as an explicitly
+enumerated fallback inside `internal/observability` when `otlp_endpoint` is unset, so
+`make config` still names its source.
+
 ## Not built yet
 
-OpenTelemetry tracing and a generated `llms.txt`. The seams are in place: `ctx`
-is the first argument of every service method, the logger is reached through the
-context, and the middleware chain has a named empty slot for tracing outside
-metrics and logging.
+A generated `llms.txt`, and Copier templating. Authentication is deliberately
+deferred to a gateway: the middleware chain has a named empty slot for it, and
+the service warns at startup when `env != local` and none is registered.
