@@ -1,0 +1,20 @@
+// Package service holds this service's business logic. It is the layer that
+// decides things.
+//
+// Belongs here: domain types, business rules and the validation of them,
+// orchestration across repositories, and the repository *interfaces* this
+// package defines for its own use. The interface is owned by the consumer,
+// not by the implementation.
+//
+// Does NOT belong here: net/http types, request or response structs, status
+// codes, SQL, driver types, or anything named after a wire format. This
+// layer takes plain Go values in and returns plain Go values and errors out.
+// If a change here would break when the transport changes, the layering is
+// wrong.
+//
+// Errors returned from here are the domain taxonomy in internal/apierror.
+// The transport maps a category to a status code; this package never does.
+//
+// Empty until Mint chunk 07, which threads an example resource through all
+// three layers.
+package service

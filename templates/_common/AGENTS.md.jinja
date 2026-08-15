@@ -1,0 +1,74 @@
+# AGENTS.md — [[ service_name ]]
+
+[[ service_description ]]
+
+Owned by **[[ service_owner ]]**. Repo: `[[ repo_url ]]`.
+
+Context for a coding agent working in **this service**. `CLAUDE.md` is this
+same file. This service was minted from Mint, so its architecture, Makefile
+targets, log schema and config precedence are the same as every other minted
+service — if you already know one, you know this one.
+
+> **Status: skeleton.** Mint chunk 09 replaces the command block below with a
+> generated one and fills the sections that name a chunk number. Those
+> sections arrive through `copier update`, not by being written here.
+
+## Two rules that outrank convenience
+
+1. **One set of facts, several representations.** Anything that appears in
+   more than one place — an operation name, a log field, a Makefile target, a
+   config key — has exactly one authoring location and is generated or checked
+   everywhere else. A hand-written description that has drifted from the code
+   is worse than no description.
+2. **Guarantees are mechanical, not aspirational.** "Keep these in step" is
+   not a rule; a check that exits non-zero when they diverge is. Add the check
+   in the same change as the rule.
+
+## Where things live
+
+**Every directory in this service carries a doc comment stating what belongs
+in it and what does not. Read that comment before you add a file to it** — it
+is the authority, and it is why directories that are still empty are worth
+keeping.
+
+| what | where |
+| --- | --- |
+| Layers, operation registry, middleware, lifecycle, ports | [`docs/architecture.md`](docs/architecture.md) |
+| The log schema — the only place a log field may be defined | [`docs/logging.md`](docs/logging.md) |
+| Config precedence, env var naming, secrets | [`docs/config.md`](docs/config.md) |
+| Test layout, naming, coverage | [`docs/testing.md`](docs/testing.md) |
+| What this service was minted from, and with which answers | `.copier-answers.yml` |
+
+## Commands
+
+Run `make help`.
+
+_Mint chunk 09 replaces this section with a block generated from the
+Makefile's own `##` comments. Do not hand-write commands here — a command list
+that is restated by hand is the first thing to go stale._
+
+## Don't do this
+
+_Mint chunk 09 fills this in from Mint's `docs/agents.md`. Three boundaries
+hold from today, and `make lint` already enforces the first:_
+
+- **Only `internal/transport/http/` may import HTTP request and response
+  types.** Everything inward of it takes and returns plain, language-native
+  values. That directory is nested one level deeper than it needs to be so
+  that a second transport is a peer directory rather than a refactor — do not
+  flatten it.
+- **Nothing outside the config package reads an environment variable.**
+- **Never label a metric with an unbounded value** — no user IDs, no raw
+  paths, no error strings.
+
+## Changing this service
+
+Files here were minted from a template, and `copier update` merges later
+template versions into them. So:
+
+- A change that every minted service should have belongs **upstream in Mint**,
+  not here. Making it here means resolving the same conflict on every update.
+- `docs/` is minted too. Edit it only to record a decision *this service* has
+  made that departs from the template.
+- `openapi.json` and `llms.txt` are generated. Never hand-edit them; change
+  the operation registry and run `make agents-docs`.

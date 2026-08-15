@@ -49,7 +49,11 @@ wait_for_port() { # wait_for_port <port> <seconds>
 }
 
 verify_one() { # verify_one <language>
-  local lang="$1" dir="$WORK/$lang"
+  # Two statements, not one: bash expands every argument to `local` before
+  # performing any of its assignments, so `local lang="$1" dir="$WORK/$lang"`
+  # expands $lang while it is still unset and dies under `set -u`.
+  local lang="$1"
+  local dir="$WORK/$lang"
   printf '\n  %s\n' "$lang"
 
   # Full generation path, tasks included — `go mod tidy` / `uv sync` running

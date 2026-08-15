@@ -1,0 +1,13 @@
+"""The parent of this service's transports. It holds no code of its own
+today, and that is the point.
+
+Its one child, `internal/transport/http`, is nested one level deeper than it
+needs to be so that a second transport — an MCP server, a queue consumer, a
+gRPC service — arrives as a peer directory here rather than as a refactor of
+everything that currently says "http". See `docs/architecture.md`.
+
+Belongs here, if anything ever does: types genuinely shared by two transports.
+Nothing qualifies while there is one.
+
+Does NOT belong here: HTTP. That has a directory.
+"""

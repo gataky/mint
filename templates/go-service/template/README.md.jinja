@@ -1,0 +1,123 @@
+# [[ service_name ]]
+
+[[ service_description ]]
+
+| | |
+| --- | --- |
+| **Owner** | [[ service_owner ]] |
+| **Repo** | `[[ repo_url ]]` |
+| **API** | <http://localhost:[[ port ]]> |
+| **Admin port** | `[[ admin_port ]]` — recorded now, served from Mint chunk 06 |
+
+[% if _copier_answers._commit %]Minted from `[[ language ]]-service` @ `[[ _copier_answers._commit ]]`.
+[% endif %]
+## Quick start
+
+You need [asdf](https://asdf-vm.com) and [direnv](https://direnv.net). Then:
+
+```sh
+asdf install                  # installs exactly what .tool-versions pins
+direnv allow                  # once; loads .env and puts ./bin on PATH
+make run                      # serves the API on :[[ port ]]
+curl -i localhost:[[ port ]]/   # -> 200, "ok"
+```
+
+`make help` lists every target. The target names, their descriptions and
+their output are identical in a Go service and a Python service minted from
+Mint — if you have used one, you have used this one.
+
+## What works today
+
+This service is deliberately almost empty. It has the full directory
+skeleton, a real Makefile, pinned tooling, and a `/` that answers `200 ok`.
+Everything else arrives from the template through `copier update` as Mint
+ships it:
+
+| | |
+| --- | --- |
+| configuration | Mint chunk 03 |
+| logging | Mint chunk 04 |
+| the error contract | Mint chunk 05 |
+| middleware, health endpoints, the admin listener, graceful shutdown | Mint chunk 06 |
+| the operation registry and a worked example | Mint chunk 07 |
+| tracing and metrics | Mint chunk 08 |
+| `openapi.json`, `llms.txt`, the generated AGENTS.md block | Mint chunk 09 |
+
+Targets that are not implemented yet exit non-zero and name the chunk that
+delivers them. None of them exits 0 having done nothing.
+
+**Every directory carries a doc comment saying what belongs in it and what
+does not.** Read it before you put a file there. That is what the empty
+directories are for.
+
+## Layout
+
+```
+cmd/[[ service_name ]]/       composition root — wiring only, no logic
+internal/transport/http/      the ONLY package that may import net/http
+internal/service/             business logic; plain Go values in and out
+internal/repository/          databases and other services, behind interfaces
+internal/apierror/            the error taxonomy and its status mapping
+internal/config/              the ONLY package that may read an env var
+internal/logging/             the log schema
+internal/observability/       tracing and metrics wiring
+config/                       checked-in configuration
+docs/                         architecture, logging, config, testing
+```
+
+`internal/transport/http/` is nested one level deeper than it needs to be, on
+purpose: a second transport becomes a peer directory instead of a refactor of
+every package that mentions HTTP. Do not flatten it.
+
+## Toolchain
+
+Every version is pinned exactly. Two people minting a week apart get the same
+toolchain, which is the only thing that makes the mint mark above mean
+anything.
+
+| tool | version | pinned in |
+| --- | --- | --- |
+| Go | 1.26.6 | `.tool-versions`, `go.mod` |
+| golangci-lint | 2.12.2 | `tool` directive in `go.mod` |
+| gofumpt | 0.11.0 | `tool` directive in `go.mod` |
+
+The linters are `tool` directives rather than `go install`, so `go tool
+golangci-lint` runs the pinned version with nothing to install and no shared
+`GOBIN` for two services to fight over.
+
+**`go.mod` therefore carries a long list of `// indirect` requires — roughly
+212 of them — and nearly all of them are golangci-lint's dependency graph,
+not this service's.** This service's own runtime dependencies are the ones in
+the `require` block without `// indirect`. The trade was made knowingly: one
+module is simpler than a second `tools/go.mod`, and the noise is confined to
+`go.mod` and `go.sum`.
+
+## Updating from the template
+
+```sh
+copier update          # brings in a newer Mint release
+```
+
+Conflicts are ordinary git conflicts, in the files you have edited.
+`.copier-answers.yml` records the answers this service was minted with;
+change an answer there and re-run `copier update` rather than editing
+generated files by hand.
+
+**Mint's version number is repo-wide.** One tag covers both language
+templates, so this service's mint mark can advance on a release that
+contained nothing but Python changes, and `copier check-update` will report
+an update that has nothing in it for you. `CHANGELOG.md` in the Mint repo is
+the only place that says whether a given release touched this language.
+
+## Where to read more
+
+- [`AGENTS.md`](AGENTS.md) — the context an agent (or a new maintainer) needs
+  first. `CLAUDE.md` is the same file.
+- [`docs/architecture.md`](docs/architecture.md) — layers, registry,
+  middleware, lifecycle, ports.
+- [`docs/config.md`](docs/config.md) · [`docs/logging.md`](docs/logging.md) ·
+  [`docs/testing.md`](docs/testing.md)
+
+`docs/` is minted from Mint's shared tree, so those files say the same thing
+in every service. Edit them only to record a decision this service has made
+that departs from the template — anything else belongs upstream in Mint.

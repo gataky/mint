@@ -182,6 +182,29 @@ lives in `CHANGELOG.md` as `go-service:` / `python-service:` / `common:`
 entries, not in tag names. A `templates/_common/` change bumps the single
 version and reaches both languages by construction.
 
+### Working on the template
+
+**Copier includes uncommitted template changes automatically**, warning
+`DirtyLocalWarning`. There is no commit-to-test cycle; `copier copy .` picks
+up the working tree as it stands.
+
+**That convenience has a cost, and it is worth knowing before it costs an
+hour.** A service generated from a dirty template records a synthetic
+`_commit` (`0.0.0.post3.dev0+afbadef`) that does not exist in the real repo,
+so `copier update` in that service fails with:
+
+```
+error: pathspec '996ca0a' did not match any file(s) known to git
+```
+
+The message blames git and the cause is the dirty template. Generate from a
+clean, tagged checkout whenever the generated service needs to be updatable —
+verified working, `_commit: v0.1.0`, exit 0.
+
+**A failing `_task` aborts generation entirely**: the destination is rolled
+back and no answers file is written. `--skip-tasks` exists and is what the
+parity script wants.
+
 ### Updates
 
 `copier update` is the reason to use Copier over cookiecutter. Document it in

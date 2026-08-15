@@ -1,0 +1,19 @@
+"""This service's business logic. The layer that decides things.
+
+Belongs here: domain types, business rules and the validation of them,
+orchestration across repositories, and the repository *protocols* this package
+defines for its own use. The interface is owned by the consumer, not by the
+implementation.
+
+Does NOT belong here: FastAPI request or response types, status codes, SQL,
+driver types, or anything named after a wire format. This layer takes plain
+Python values in and returns plain Python values, and raises the domain
+exceptions in `internal/apierror`. If a change here would break when the
+transport changes, the layering is wrong.
+
+The transport maps an error category onto an HTTP status; this package never
+does.
+
+Empty until Mint chunk 07, which threads an example resource through all three
+layers.
+"""

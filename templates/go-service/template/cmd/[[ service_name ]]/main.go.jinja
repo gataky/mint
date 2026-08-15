@@ -1,0 +1,43 @@
+// Command [[ service_name ]] is this service's composition root: the one
+// place that knows how the pieces fit together.
+//
+// Belongs here: loading configuration, building the logger and the tracer,
+// constructing the repository, injecting it into the service layer,
+// injecting that into the transport, starting the listeners and shutting
+// them down.
+//
+// Does NOT belong here: business rules, HTTP types, SQL, or anything a test
+// would want to call. This file has no unit tests by design — if you find
+// yourself wanting one, the thing you want to test belongs in internal/.
+//
+// This file must not import net/http. `make lint` fails if it does: servers
+// are constructed in internal/transport/http, which is the only package
+// allowed to know that HTTP exists.
+package main
+
+import (
+	"fmt"
+	"os"
+
+	transporthttp "[[ module_path ]]/internal/transport/http"
+)
+
+// addr was baked in at mint time from the `port` answer. Mint chunk 03
+// replaces it with internal/config; until then this service reads no
+// configuration at all, which is why there is nothing here to load.
+//
+// It binds the loopback interface deliberately. Mint chunk 03 makes the host
+// configurable, which is when binding 0.0.0.0 becomes a decision someone
+// makes rather than a default nobody noticed.
+const addr = "127.0.0.1:[[ port ]]"
+
+func main() {
+	// One plain line, not a log record. Mint chunk 04 owns logging, and a
+	// half-configured logger here would be the thing chunk 04 has to undo.
+	fmt.Printf("[[ service_name ]] listening on http://%s\n", addr)
+
+	if err := transporthttp.ListenAndServe(addr); err != nil {
+		fmt.Fprintf(os.Stderr, "[[ service_name ]]: %v\n", err)
+		os.Exit(1)
+	}
+}

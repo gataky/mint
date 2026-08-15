@@ -1,0 +1,38 @@
+# golangci-lint configuration. The version is pinned by a `tool` directive in
+# go.mod, so `go tool golangci-lint` needs no separate install and cannot
+# drift from what CI runs.
+#
+# `version: "2"` is required, not decorative: golangci-lint 2.x treats a
+# v1-shaped config as a hard error rather than a warning, and the message it
+# prints does not name this line. Check this file with
+# `go tool golangci-lint config verify`.
+version: "2"
+
+linters:
+  # "standard" is errcheck, govet, ineffassign, staticcheck and unused. The
+  # additions below each earn their place; a lint that fires on style opinions
+  # nobody agreed to is a lint people learn to ignore.
+  default: standard
+  enable:
+    - bodyclose # an unclosed response body leaks a connection, silently
+    - errorlint # %v on an error breaks errors.Is/As for every caller
+    - misspell
+    - revive
+
+  settings:
+    revive:
+      rules:
+        # Every directory in this service carries a package comment saying
+        # what belongs in it. That is the rule this repo is built on, so it
+        # is checked rather than remembered.
+        - name: package-comments
+        - name: exported
+          arguments:
+            - disableStutteringCheck
+
+formatters:
+  # Deliberately empty. Formatting is `make fmt`, which runs the gofumpt
+  # pinned in go.mod. Enabling a formatter here would run golangci-lint's
+  # bundled copy instead, and two gofumpt versions disagreeing is a `make
+  # lint` failure that `make fmt` cannot fix.
+  enable: []

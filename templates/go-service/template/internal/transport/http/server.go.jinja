@@ -1,0 +1,63 @@
+// Package http is the HTTP transport, and the only package in this service
+// that may import net/http. `make lint` fails the build if any other package
+// does.
+//
+// It nests one level deeper than it needs to — internal/transport/http rather
+// than internal/http — so that a second transport is a peer directory and not
+// a refactor. Do not flatten it. See docs/architecture.md.
+//
+// Belongs here: routing, request decoding, response encoding, the mapping
+// from an error category to an HTTP status, middleware, and the servers'
+// own timeouts.
+//
+// Does NOT belong here: business rules, validation beyond "is this the shape
+// I was promised", or anything that reads a database. Handlers call the
+// service layer with plain Go values and serialize what comes back.
+package http
+
+import (
+	"net/http"
+	"time"
+)
+
+// ListenAndServe serves the API on addr and blocks until the server stops.
+//
+// Mint chunk 06 replaces this with the real lifecycle: two listeners built
+// from one slice, signal handling, and a drain with a shared deadline.
+func ListenAndServe(addr string) error {
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: newRouter(),
+		// A server with no header timeout will hold a connection open
+		// forever for a client that never finishes its request line.
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	return srv.ListenAndServe()
+}
+
+// newRouter builds the API router.
+//
+// There is exactly one route, on purpose. Mint chunk 06 adds health and
+// middleware, and chunk 07 registers the real routes from the operation
+// registry — handlers are not written here one by one.
+func newRouter() *http.ServeMux {
+	mux := http.NewServeMux()
+
+	// "/{$}" matches only "/". A bare "/" would match every path this
+	// service does not otherwise handle, and answering 200 to a request for
+	// /widgets before /widgets exists is worse than answering 404.
+	mux.HandleFunc("GET /{$}", handleRoot)
+
+	return mux
+}
+
+// handleRoot answers the liveness probe a human reaches for first.
+//
+// It is not /healthz. Mint chunk 06 adds the real health endpoints on the
+// admin port, and they answer questions this one cannot.
+func handleRoot(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ok\n"))
+}

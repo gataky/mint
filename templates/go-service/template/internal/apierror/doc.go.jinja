@@ -1,0 +1,16 @@
+// Package apierror owns this service's error taxonomy and the table that maps
+// a category onto a transport's way of reporting it.
+//
+// Belongs here: the sentinel errors for the six categories — invalid,
+// not_found, conflict, unauthorized, forbidden, internal — the helpers that
+// wrap a cause into one, and the category-to-status table.
+//
+// Does NOT belong here: response bodies. The transport renders the RFC 9457
+// problem+json document; this package tells it which category it is holding.
+// A second transport adds a column to the table rather than a fork of it.
+//
+// Driver errors and stack traces never cross the transport boundary. Log the
+// detail, return the category.
+//
+// Empty until Mint chunk 05.
+package apierror

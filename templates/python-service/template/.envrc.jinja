@@ -1,0 +1,16 @@
+# direnv — run `direnv allow` once and every shell in this directory is set up.
+#
+# The toolchain itself needs nothing here: asdf's shims read .tool-versions,
+# which pins the exact CPython and uv this service was minted against.
+
+# Uncommitted local overrides. These arrive as ordinary environment variables
+# before any process starts, which is why this is the supported way to keep
+# machine-specific values — see docs/config.md. .env is gitignored; do not
+# commit one, and do not put a secret in it that you would mind on disk.
+dotenv_if_exists .env
+
+# uv keeps this project's virtualenv here. Putting it on PATH means `python`,
+# `pytest` and `ruff` resolve to the pinned ones without a `uv run` prefix;
+# the Makefile still says `uv run` so that it works without direnv too.
+export VIRTUAL_ENV="$PWD/.venv"
+PATH_add .venv/bin

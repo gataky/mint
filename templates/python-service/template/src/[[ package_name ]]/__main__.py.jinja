@@ -1,0 +1,52 @@
+"""This service's composition root: the one place that knows how the pieces
+fit together.
+
+Belongs here: loading configuration, building the logger and the tracer,
+constructing the repository, injecting it into the service layer, injecting
+that into the transport, starting the listeners and shutting them down.
+
+Does NOT belong here: business rules, request or response types, SQL, or
+anything a test would want to call. This module has no unit tests by design —
+if you find yourself wanting one, the thing you want to test belongs under
+`internal/`.
+
+This module must not import FastAPI. `make lint` fails if it does: the app is
+constructed in `internal/transport/http`, which is the only package allowed to
+know that HTTP exists.
+
+It is also why the entry point is `python -m [[ package_name ]]` rather than
+the `uvicorn` CLI. The CLI configures logging *before* importing the app,
+installing non-propagating handlers that no in-app configuration can reclaim,
+and the service would ship two log formats.
+"""
+
+import uvicorn
+
+from [[ package_name ]].internal.transport.http.server import app
+
+# Baked in at mint time from the `port` answer. Mint chunk 03 replaces this
+# with internal/config; until then this service reads no configuration at all,
+# which is why there is nothing here to load.
+#
+# It binds the loopback interface deliberately. Mint chunk 03 makes the host
+# configurable, which is when binding 0.0.0.0 becomes a decision someone makes
+# rather than a default nobody noticed.
+HOST = "127.0.0.1"
+PORT = [[ port ]]
+
+
+def main() -> None:
+    """Serve the API and block until the server stops."""
+    # One plain line, not a log record. Mint chunk 04 owns logging, and a
+    # half-configured logger here would be the thing chunk 04 has to undo.
+    print(f"[[ service_name ]] listening on http://{HOST}:{PORT}")  # noqa: T201
+
+    # log_config=None keeps uvicorn from calling dictConfig() and stealing the
+    # root handler; access_log=False retires its unstructured access line.
+    # Mint chunk 04 installs the handler this leaves room for, and chunk 06
+    # takes over signal handling and the drain.
+    uvicorn.run(app, host=HOST, port=PORT, log_config=None, access_log=False)
+
+
+if __name__ == "__main__":
+    main()

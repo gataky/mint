@@ -1,0 +1,17 @@
+// Package logging builds this service's logger and owns the log schema.
+//
+// Belongs here: the handler that renders the two tiers (a human console form
+// for local development, one JSON object per line everywhere else), the
+// reserved-field block, trace correlation, and redaction.
+//
+// Does NOT belong here: log call sites. Those live wherever the interesting
+// thing happened.
+//
+// The field set is defined in docs/logging.md and nowhere else. Mint's
+// `make parity` boots a service in each language and diffs the emitted keys
+// against that document, so a field invented at a call site is a parity
+// failure rather than a nice extra.
+//
+// Empty until Mint chunk 04. Until then the service prints one plain startup
+// line, and that is not a log record — do not build on it.
+package logging
