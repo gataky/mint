@@ -2,11 +2,15 @@
 
 Context for coding agents working in this repo. Read `README.md` first.
 
-Each service has its own `AGENTS.md` with the rules specific to it. Read the one
-for the service you are changing:
+Each directory under `foundry/` has its own `AGENTS.md` with the rules specific
+to it. Read the one for what you are changing:
 
 - [`foundry/go-service/AGENTS.md`](foundry/go-service/AGENTS.md)
 - [`foundry/py-service/AGENTS.md`](foundry/py-service/AGENTS.md)
+- [`foundry/py-client/AGENTS.md`](foundry/py-client/AGENTS.md) — a **library**,
+  not a template. It is never rendered, copied or parameterized; it is installed
+  as a dependency by downstream projects. Do not add it to `templates/`, and
+  treat its public API as a compatibility promise.
 
 ## The one rule that spans both
 
