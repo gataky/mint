@@ -9,6 +9,12 @@
 > executed spike, not by reasoning.** Where this document and an ADR
 > disagree, the ADR wins and this document is stale — say so rather than
 > splitting the difference.
+>
+> **The ADRs were never written.** They were cut along with the rest of the
+> aspirational scope, so an "ADR NNNN" below is a reference to reasoning that
+> exists only in this file. They are cited as plain text rather than as links
+> for that reason. Where this document and the repo disagree, the repo wins —
+> see `AGENTS.md`.
 
 ## Goal
 
@@ -38,7 +44,7 @@ it in favor of these:
    in `make parity` or `make test` that fails when they stop matching.
 
 **What must match is narrower than it first appears**
-([ADR 0017](docs/decisions/0017-parity-is-a-boundary-contract-not-an-equivalence.md)).
+(ADR 0017).
 Parity is required only where something *outside* the service consumes the
 thing: the Makefile command surface, metric names and label keys, log field
 names, and config precedence. Everywhere else — internal layout, error
@@ -68,8 +74,8 @@ Makefile, asdf, direnv.
 | Dockerfiles, docker-compose | Phase 2 | empty `docker/` dir, reserved |
 | CI pipelines | Phase 2 | empty `.github/workflows/`, reserved |
 | Kubernetes manifests | Phase 3 | `service_name` is DNS-label-safe; `service_owner` captured now |
-| **MCP server** | SDK churn — Python shipped a breaking v2.0.0 in July 2026 that would owe every generated service a migration ([ADR 0004](docs/decisions/0004-defer-the-mcp-server.md)) | registry is transport-agnostic; a spike built a working MCP transport in 62 lines with zero edits to the service or error layers |
-| **Authentication** | expected at a gateway or mesh ([ADR 0005](docs/decisions/0005-defer-authentication-to-a-gateway.md)) | a named, empty slot in the middleware chain |
+| **MCP server** | SDK churn — Python shipped a breaking v2.0.0 in July 2026 that would owe every generated service a migration (ADR 0004) | registry is transport-agnostic; a spike built a working MCP transport in 62 lines with zero edits to the service or error layers |
+| **Authentication** | expected at a gateway or mesh (ADR 0005) | a named, empty slot in the middleware chain |
 
 **The MCP seam is thinner than it looks, in one specific way.** The entire
 middleware chain is typed `func(http.Handler) http.Handler` and lives inside
@@ -116,7 +122,7 @@ This is not a style preference. Copier treats a path as VCS-tracked only when
 it *is* the git repo root, so a per-template `copier.yml` under
 `templates/go-service/` yields `Copying from template version None`, records
 no `_commit`, and makes `copier update` exit 1 with "cannot obtain old
-template references" ([ADR 0009](docs/decisions/0009-repo-wide-semver-tags.md),
+template references" (ADR 0009,
 Finding 4). Two separate question sets are not achievable; one shared set is
 what the tool supports.
 
@@ -207,7 +213,7 @@ quietly begins tracking HEAD. A spike watched an untagged WIP commit land in a
 generated service with `check-update` reporting "up-to-date" indefinitely. No
 tag scheme fixes this; PEP 440 local versions parse but Copier takes the
 global max, resolving a Go service to `v1.1.0+python`
-([ADR 0009](docs/decisions/0009-repo-wide-semver-tags.md)).
+(ADR 0009).
 
 The measured cost of a Python-only release on a Go service is two lines
 (`_commit` and the mint mark), zero code churn, zero conflict risk. Scope
@@ -312,7 +318,7 @@ all read the registry rather than restating it.
 tried and produced a document that *lied while passing its validator* —
 `time.Time` became `{"type":"object","properties":{}}` and every enum
 degraded to plain `string`. Four kinds of intent must be declared, and one is
-harvested from source ([ADR 0001](docs/decisions/0001-generate-openapi-from-the-operation-registry.md)):
+harvested from source (ADR 0001):
 
 | reflection cannot infer | how it's supplied |
 | --- | --- |
@@ -394,7 +400,7 @@ recovery → request-id → tracing → metrics → logging → [auth: reserved]
 
 Auth sits **inside** logging and metrics, under the rule *observe
 everything, then authorize, then execute*
-([ADR 0005](docs/decisions/0005-defer-authentication-to-a-gateway.md)). An
+(ADR 0005). An
 access log that omits rejected requests is a success log — you can't answer
 "401s are spiking, from where?" The accepted cost: an unauthenticated flood
 drives log volume directly. Auth stays outside `timeout`, because the request
@@ -408,10 +414,10 @@ deferral mechanical rather than remembered.
 ## Language-specific stack
 
 **Go**
-- Go **1.26.6** ([ADR 0011](docs/decisions/0011-pinned-toolchain-versions.md))
+- Go **1.26.6** (ADR 0011)
 - `net/http` (stdlib) — no web framework
 - `log/slog` (stdlib), with `lmittmann/tint` **v1.2.0** for tier-1 color
-  ([ADR 0012](docs/decisions/0012-pin-lmittmann-tint-for-go-console-logging.md))
+  (ADR 0012)
 - `go-playground/validator` for runtime constraint enforcement
 - `golangci-lint` + `gofumpt`, config checked in
 
@@ -419,7 +425,7 @@ deferral mechanical rather than remembered.
 - CPython **3.14.7**; FastAPI, pydantic, OTel SDK and structlog all verified
   running on it
 - `uv` for dependencies (`pyproject.toml`, `uv.lock`)
-- FastAPI + `structlog` ([ADR 0010](docs/decisions/0010-use-structlog-for-python-logging.md))
+- FastAPI + `structlog` (ADR 0010)
 - `ruff` (lint + format) and `mypy --strict`
 
 **`ruff` 0.16.0 changed its defaults from 59 rules to 413.** The template
@@ -440,7 +446,7 @@ week apart must get identical toolchains.
 Precedence, highest to lowest: **environment variables > YAML**. There is
 deliberately no third source.
 
-**Env var naming** ([ADR 0002](docs/decisions/0002-environment-variable-naming.md)):
+**Env var naming** (ADR 0002):
 `MINT_` + the config path upper-cased, with `__` between levels and the key's
 own underscores preserved.
 
@@ -468,7 +474,7 @@ disagreeing about `service` or `env` would break the error→trace path.
 `.env` file beat YAML in the spike. The Python template must override
 `settings_customise_sources`, and a parity check must assert both languages
 report exactly `["yaml", "env"]`
-([ADR 0006](docs/decisions/0006-load-config-from-env-over-yaml-only.md)).
+(ADR 0006).
 `.env` is **direnv's** business (`dotenv_if_exists` in `.envrc`), never the
 application's.
 
@@ -554,7 +560,7 @@ OpenTelemetry, wired only in `internal/observability`.
 
 ## Metrics
 
-Names and labels ([ADR 0003](docs/decisions/0003-metric-naming-and-labels.md)):
+Names and labels (ADR 0003):
 
 | metric | labels |
 | --- | --- |
@@ -600,7 +606,7 @@ On the admin port:
   lists every check either way.
 
 **Ports stay split** at `port + 1000`, but the rationale is **routing and
-lifecycle, not security** ([ADR 0008](docs/decisions/0008-serve-api-and-admin-on-separate-ports.md)).
+lifecycle, not security** (ADR 0008).
 Any pod reaching the pod IP reaches every container port — kubebuilder now
 defaults `--metrics-bind-address` to `0` for exactly this reason. What the
 split actually buys is drain visibility: mid-drain, split returns
@@ -615,7 +621,7 @@ testing only that path would pass while shipping the bug.
 
 The fix has a consequence the spec didn't anticipate: **`uvicorn.run()` is
 not used in a finished Mint service**
-([ADR 0014](docs/decisions/0014-python-entrypoint-owns-its-servers-and-signals.md)).
+(ADR 0014).
 It builds exactly one `Server` and exposes no handle on which to neutralize
 `capture_signals`, so the composition root constructs `uvicorn.Config` and
 `uvicorn.Server` per listener and owns SIGTERM itself. `log_config=None` and
@@ -696,14 +702,14 @@ cleanly.
 
 The downgraded copy is committed as **`openapi-3.0.json`** and governed by
 the same four rules as the other generated artifacts
-([ADR 0013](docs/decisions/0013-govern-the-downgraded-openapi-document.md)).
+(ADR 0013).
 It is **served nowhere** — it's a build artifact for client generators, not
 a second API surface. `/openapi.json` serves 3.1 and only 3.1.
 
 **`/llms.txt`** — generated, never hand-written.
 
 **Both are committed to the generated repo**
-([ADR 0007](docs/decisions/0007-commit-the-generated-discovery-artifacts.md)),
+(ADR 0007),
 so drift shows up as a PR diff. Measured: `copier update` leaves
 `openapi.json` untouched with zero conflict markers, because Copier only
 three-way-merges files it renders — which makes it a **rule** that these are

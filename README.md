@@ -9,14 +9,23 @@ template for minting new services, in either language.
 
 ```
 mint/
-├── foundry/          the two reference services — runnable, and where a change starts
+├── foundry/          the reference services — runnable, and where a change starts
 │   ├── go-service/   Go 1.26 · net/http · huma · koanf · slog + tint · OTel
-│   └── py-service/   Python 3.14 · FastAPI · uvicorn · pydantic-settings · loguru · OTel
+│   ├── py-service/   Python 3.14 · FastAPI · uvicorn · pydantic-settings · loguru · OTel
+│   └── py-client/    Python 3.14 · httpx2 · pydantic · OTel — a LIBRARY, not a template
 ├── copier.yml        the template definition — one, at the repo root
 └── templates/        the deliverable — what Copier renders into a new service
     ├── go-service/template/   the parameterized copy of foundry/go-service/
     └── py-service/template/   the parameterized copy of foundry/py-service/
 ```
+
+The two **services** are templated: copied into `templates/`, parameterized, and
+rendered into a new service that then owns the code. **`py-client/` is not.** It
+is a library, installed as a dependency by any project that calls a Mint service
+— including projects that were never minted from this repo. It is the outbound
+half of the same conventions: `traceparent`, `X-Request-Id`, the request
+deadline, `problem+json`, and the `http_client_*` mirror of the server metrics.
+See [`foundry/py-client/README.md`](foundry/py-client/README.md).
 
 The two services stay runnable: they are the reference, and the templates are
 generated copies of them, not a replacement.

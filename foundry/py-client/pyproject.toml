@@ -1,0 +1,87 @@
+[project]
+name = "mint-client"
+version = "0.1.0"
+description = "The outbound HTTP client for Mint services. Generated from nothing — this is the source."
+requires-python = ">=3.14"
+
+# A library's dependency list is a tax on every service that installs it, so
+# this one is deliberately short.
+#
+# opentelemetry-API, never the SDK. A library records spans against whatever
+# provider the application installed; depending on the SDK would let a library
+# drag in a second tracer implementation and, worse, imply it may configure one.
+# py-service owns the provider, in observability.py, exactly as before.
+dependencies = [
+    "httpx2>=2.10",
+    "pydantic>=2.12",
+    "prometheus-client>=0.26.0",
+    "opentelemetry-api>=1.44.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4",
+    "pytest-asyncio>=1.2",
+    "pytest-cov>=7.0",
+    # The SDK is a *test* dependency: asserting on exported spans needs a real
+    # provider. Nothing under src/ imports it.
+    "opentelemetry-sdk>=1.44.0",
+    "ruff>=0.14",
+    "mypy>=1.18",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mint_client"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-m 'not integration'"
+markers = [
+    "integration: a test that needs something outside this process",
+]
+
+[tool.coverage.run]
+source = ["src/mint_client"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+# Listed explicitly rather than inherited, for the same reason py-service lists
+# them: ruff changed its defaults from 59 rules to 413 in 0.16.0, and inheriting
+# means an upgrade silently changes what `make lint` means.
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # import sorting
+    "N",    # pep8 naming
+    "UP",   # pyupgrade
+    "B",    # bugbear
+    "C4",   # comprehensions
+    "SIM",  # simplify
+    "RUF",  # ruff-specific
+    "ASYNC",# async correctness
+    "PT",   # pytest style
+    "RET",  # return simplification
+    "ARG",  # unused arguments
+    "PTH",  # use pathlib
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ARG001"]
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
