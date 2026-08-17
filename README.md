@@ -4,54 +4,44 @@ Two reference microservices — one Go, one Python — that expose the **same AP
 and the **same Makefile**. A client cannot tell which one it is talking to; a
 developer moving between them does not have to relearn anything.
 
-Each one is also the source of a [Copier](https://copier.readthedocs.io/)
-template for minting new services, in either language.
-
 ```
 mint/
-├── foundry/          the reference services — runnable, and where a change starts
-│   ├── go-service/   Go 1.26 · net/http · huma · koanf · slog + tint · OTel
-│   ├── py-service/   Python 3.14 · FastAPI · uvicorn · pydantic-settings · loguru · OTel
-│   └── py-client/    Python 3.14 · httpx2 · pydantic · OTel — a LIBRARY, not a template
-├── copier.yml        the template definition — one, at the repo root
-└── templates/        the deliverable — what Copier renders into a new service
-    ├── go-service/template/   the parameterized copy of foundry/go-service/
-    └── py-service/template/   the parameterized copy of foundry/py-service/
+└── foundry/          the reference services — runnable, and where a change starts
+    ├── go-service/   Go 1.26 · net/http · huma · koanf · slog + tint · OTel
+    └── py-service/   Python 3.14 · FastAPI · uvicorn · pydantic-settings · loguru · OTel
 ```
 
-The two **services** are templated: copied into `templates/`, parameterized, and
-rendered into a new service that then owns the code. **`py-client/` is not.** It
-is a library, installed as a dependency by any project that calls a Mint service
-— including projects that were never minted from this repo. It is the outbound
-half of the same conventions: `traceparent`, `X-Request-Id`, the request
-deadline, `problem+json`, and the `http_client_*` mirror of the server metrics.
-See [`foundry/py-client/README.md`](foundry/py-client/README.md).
+This repo is the **workbench**, not the distribution point. The two services
+stay runnable here: they are the reference, and a change is worked out and
+proven against both of them (`make compare`) before it goes anywhere else.
 
-The two services stay runnable: they are the reference, and the templates are
-generated copies of them, not a replacement.
+The rest of the system lives in sibling repos under
+[github.com/dyosmos](https://github.com/dyosmos):
 
-## Minting a service
+- **[`go-service-template`](https://github.com/dyosmos/go-service-template)**
+  and **[`py-service-template`](https://github.com/dyosmos/py-service-template)**
+  — the [Copier](https://copier.readthedocs.io/) templates minted from
+  `foundry/go-service/` and `foundry/py-service/`. Each is a parameterized copy
+  of its reference service, published as its own repo so a new service can be
+  minted without cloning `mint`. `copier.yml` has to live at a template repo's
+  root for Copier's VCS tracking to work, which is why the templates are not
+  just a subdirectory here.
+- **`py-client`** — the outbound HTTP client library, installed as a
+  dependency by any project that calls a Mint service, including projects
+  never minted from this repo. It carries the same conventions in the outbound
+  direction: `traceparent`, `X-Request-Id`, the request deadline,
+  `problem+json`, and the `http_client_*` mirror of the server metrics. It was
+  never a Copier template, so it moved out whole rather than being split into
+  a reference/deliverable pair. **Not yet published** — it is still being
+  worked on before it becomes `dyosmos/py-client`.
 
-```sh
-make mint DEST=../parts-svc
-```
-
-Copier asks for the language, service name, description, owner, repo URL,
-environment-variable prefix, ports, and whether to include the two example
-resources — plus the Go module path or the Python package name, whichever
-applies. It then runs `git init`, resolves dependencies (`go mod tidy` or
-`uv lock && uv sync`), and prints what to do next. Answers land in
-`.copier-answers.yml`, and `copier update` inside the generated service pulls in
-later template changes as a three-way merge.
-
-```sh
-make verify   # generate, build, test, lint and boot a service — four times
-```
-
-`make verify` generates each language with the defaults and again with no
-examples, a custom env prefix and custom ports, because the interesting failures
-live at the answers that are not the defaults. `make verify ONLY=py` runs one
-language.
+A change to the API surface (routes, the error contract, log fields, metric
+names, config keys, the Makefile target list) must still land in both
+`foundry/go-service/` and `foundry/py-service/` in the same change here, and
+then be carried into `go-service-template`/`py-service-template` as a
+follow-up change in those repos. There is no automated check that spans the
+repo boundary — `make compare` proves the two foundry services agree; keeping
+each template in sync with its foundry service is a manual step for now.
 
 ## Quick start
 
@@ -89,9 +79,12 @@ out to both.
 
 ```sh
 make compare              # boots both and diffs what they return, request by request
-make mint DEST=../my-svc  # generate a new service from the template
-make verify               # generate, build, test, lint and boot the result
 ```
+
+To mint a new service, use the template repo for the language you want —
+`make mint DEST=../my-svc` in a checkout of
+[`go-service-template`](https://github.com/dyosmos/go-service-template) or
+[`py-service-template`](https://github.com/dyosmos/py-service-template).
 
 ## What is guaranteed to match
 
@@ -189,18 +182,24 @@ Add direnv's hook to your shell, then `direnv allow` in each service directory.
 
 **Built:** config, two log tiers, the error contract, the HTTP transport, health
 endpoints, Prometheus metrics, OpenTelemetry tracing, graceful shutdown,
-OpenAPI 3.1 with Swagger UI, tests, Makefiles, asdf and direnv — and the Copier
-templates for both services, verified end to end by `make verify`.
+OpenAPI 3.1 with Swagger UI, tests, Makefiles, asdf and direnv, and the Copier
+templates published as their own repos.
 
 **Next, in rough order:**
 
-1. **Versioning and updates** — repo-wide semver tags, a mint mark in the
-   generated README that names the version it came from, and a documented
-   `copier update` run. The template already writes `.copier-answers.yml`;
-   without tags, generated services track HEAD.
-2. **A conformance test** — `scripts/compare.sh` is a script you read the output
+1. **Publish `py-client`** as `dyosmos/py-client`, once it has had more work
+   done on it first.
+2. **Versioning and updates** — repo-wide semver tags on the template repos, a
+   mint mark in the generated README that names the version it came from, and
+   a documented `copier update` run. The templates already write
+   `.copier-answers.yml`; without tags, generated services track HEAD.
+3. **A conformance test** — `scripts/compare.sh` is a script you read the output
    of, not a test suite. Promoting it to something that runs in CI is a
    deliberate later step.
+4. **Cross-repo drift detection** — nothing today checks that
+   `go-service-template`/`py-service-template` still match the `foundry/`
+   service they were generated from. A change landing only in `foundry/` is a
+   silent template regression until someone notices.
 
 **Deliberately not built:** authentication (expected at a gateway; the
 middleware chain has a named empty slot and both services warn at startup when

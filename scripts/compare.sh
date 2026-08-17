@@ -14,8 +14,9 @@ set -uo pipefail
 
 cd "$(dirname "$0")/.."
 
-# The two reference services live under foundry/; the Copier templates under
-# templates/ are a separate tree and are not what this script compares.
+# The two reference services live under foundry/. The Copier templates minted
+# from them live in the go-service-template/py-service-template repos and are
+# not what this script compares.
 GO_SVC=foundry/go-service
 PY_SVC=foundry/py-service
 

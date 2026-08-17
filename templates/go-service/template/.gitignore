@@ -1,9 +1,0 @@
-# Build artifacts
-bin/
-
-# Local configuration and secrets — never committed.
-config/config.local.yaml
-.env
-
-# Coverage output
-coverage.out
