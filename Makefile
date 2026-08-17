@@ -4,8 +4,8 @@
 # and foundry/py-service/Makefile. Every target below exists in both.
 #
 # The Copier templates minted from these services live in their own repos
-# under github.com/dyosmos — see README.md. py-client moved out too, ahead of
-# being published the same way.
+# under github.com/dyosmos — see README.md. py-http-client moved out too,
+# ahead of being published the same way.
 
 .DEFAULT_GOAL := help
 SHELL := /usr/bin/env bash

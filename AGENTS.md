@@ -3,7 +3,7 @@
 Context for coding agents working in this repo. Read `README.md` first — it
 explains the split across `github.com/dyosmos`: the Copier templates minted
 from the two reference services here now live in their own repos, and
-`py-client` has moved out to its own working directory ahead of being
+`py-http-client` has moved out to its own working directory ahead of being
 published the same way.
 
 Each directory under `foundry/` has its own `AGENTS.md` with the rules specific
@@ -15,8 +15,8 @@ to it. Read the one for what you are changing:
 The template-authoring rules (the `{@ @}` delimiter, gated files, the
 `include_examples: false` requirement, `copier.yml`'s VCS-root constraint) now
 live in `go-service-template`'s and `py-service-template`'s own `AGENTS.md`,
-since template source no longer lives in this repo. `py-client`'s rules live
-alongside it in its own working directory.
+since template source no longer lives in this repo. `py-http-client`'s rules
+live alongside it in its own working directory.
 
 ## The one rule that spans both services
 

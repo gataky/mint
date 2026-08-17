@@ -26,14 +26,15 @@ The rest of the system lives in sibling repos under
   minted without cloning `mint`. `copier.yml` has to live at a template repo's
   root for Copier's VCS tracking to work, which is why the templates are not
   just a subdirectory here.
-- **`py-client`** — the outbound HTTP client library, installed as a
+- **`py-http-client`** — the outbound HTTP client library, installed as a
   dependency by any project that calls a Mint service, including projects
-  never minted from this repo. It carries the same conventions in the outbound
-  direction: `traceparent`, `X-Request-Id`, the request deadline,
+  never minted from this repo. Named for the transport it speaks, because a
+  NATS client is planned as a sibling. It carries the same conventions in the
+  outbound direction: `traceparent`, `X-Request-Id`, the request deadline,
   `problem+json`, and the `http_client_*` mirror of the server metrics. It was
   never a Copier template, so it moved out whole rather than being split into
   a reference/deliverable pair. **Not yet published** — it is still being
-  worked on before it becomes `dyosmos/py-client`.
+  worked on before it becomes `dyosmos/py-http-client`.
 
 A change to the API surface (routes, the error contract, log fields, metric
 names, config keys, the Makefile target list) must still land in both
@@ -187,7 +188,7 @@ templates published as their own repos.
 
 **Next, in rough order:**
 
-1. **Publish `py-client`** as `dyosmos/py-client`, once it has had more work
+1. **Publish `py-http-client`** as `dyosmos/py-http-client`, once it has had more work
    done on it first.
 2. **Versioning and updates** — repo-wide semver tags on the template repos, a
    mint mark in the generated README that names the version it came from, and
