@@ -26,15 +26,26 @@ The rest of the system lives in sibling repos under
   minted without cloning `mint`. `copier.yml` has to live at a template repo's
   root for Copier's VCS tracking to work, which is why the templates are not
   just a subdirectory here.
-- **`py-http-client`** — the outbound HTTP client library, installed as a
-  dependency by any project that calls a Mint service, including projects
-  never minted from this repo. Named for the transport it speaks, because a
-  NATS client is planned as a sibling. It carries the same conventions in the
-  outbound direction: `traceparent`, `X-Request-Id`, the request deadline,
-  `problem+json`, and the `http_client_*` mirror of the server metrics. It was
-  never a Copier template, so it moved out whole rather than being split into
-  a reference/deliverable pair. **Not yet published** — it is still being
-  worked on before it becomes `dyosmos/py-http-client`.
+- **[`go-http-client`](https://github.com/dyosmos/go-http-client)** and
+  **[`py-http-client`](https://github.com/dyosmos/py-http-client)** — the
+  outbound HTTP client libraries, one per language, installed as a dependency
+  by any project that calls a Mint service including projects never minted
+  from this repo. Named for the transport they speak, because a NATS client is
+  planned as a sibling. They carry the same conventions in the outbound
+  direction: `traceparent`, `X-Request-Id`, the request deadline,
+  `problem+json`, and the `http_client_*` mirror of the server metrics. Neither
+  was ever a Copier template, so each moved out whole rather than being split
+  into a reference/deliverable pair.
+
+  The two are held to the same contract as the two services — header names,
+  metric names and label keys, span naming, the `problem+json` shape, and the
+  config keys — and are deliberately *not* held to the same call shape. Go
+  binds a response with a generic function because a method cannot take a type
+  parameter; Python uses `into=`. Go needs no deadline plumbing at all, because
+  `context.WithTimeout` already refuses to widen a parent deadline, where the
+  Python client has to implement that on a `ContextVar` by hand. Writing Go
+  that looks like Python produces bad Go; the contract is what goes on the
+  wire.
 
 A change to the API surface (routes, the error contract, log fields, metric
 names, config keys, the Makefile target list) must still land in both
@@ -183,13 +194,16 @@ Add direnv's hook to your shell, then `direnv allow` in each service directory.
 
 **Built:** config, two log tiers, the error contract, the HTTP transport, health
 endpoints, Prometheus metrics, OpenTelemetry tracing, graceful shutdown,
-OpenAPI 3.1 with Swagger UI, tests, Makefiles, asdf and direnv, and the Copier
-templates published as their own repos.
+OpenAPI 3.1 with Swagger UI, tests, Makefiles, asdf and direnv, the Copier
+templates published as their own repos, and both outbound HTTP clients.
 
 **Next, in rough order:**
 
-1. **Publish `py-http-client`** as `dyosmos/py-http-client`, once it has had more work
-   done on it first.
+1. **A worked example of a client against a running service.**
+   `service.WidgetLookup` in both foundry services is already the right shape:
+   a remote implementation satisfying that interface over HTTP would swap in at
+   a composition root with nothing else changing. Neither service imports its
+   client today, so nothing proves the two halves fit.
 2. **Versioning and updates** — repo-wide semver tags on the template repos, a
    mint mark in the generated README that names the version it came from, and
    a documented `copier update` run. The templates already write
@@ -199,8 +213,10 @@ templates published as their own repos.
    deliberate later step.
 4. **Cross-repo drift detection** — nothing today checks that
    `go-service-template`/`py-service-template` still match the `foundry/`
-   service they were generated from. A change landing only in `foundry/` is a
-   silent template regression until someone notices.
+   service they were generated from, or that the two HTTP clients still agree
+   with each other and with what the services put on the wire. A change landing
+   only in `foundry/` is a silent template regression until someone notices,
+   and there are now five repos that have to move together.
 
 **Deliberately not built:** authentication (expected at a gateway; the
 middleware chain has a named empty slot and both services warn at startup when
